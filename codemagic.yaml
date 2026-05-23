@@ -1,0 +1,70 @@
+workflows:
+  android-apk:
+    name: MrDownload APK
+    max_build_duration: 60
+    environment:
+      node: 18.17.0
+      java: 17
+    scripts:
+      - name: Install dependencies
+        script: npm install
+
+      - name: Expo Prebuild
+        script: npx expo prebuild --platform android --clean
+
+      - name: Fix gradlew permission
+        script: chmod +x android/gradlew
+
+      - name: Create Keystore
+        script: |
+          keytool -genkeypair -v \
+            -keystore android/app/upload-keystore.jks \
+            -alias upload \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 9125 \
+            -storepass Upload123 \
+            -keypass Upload123 \
+            -dname "CN=MrDownload,O=MrDownload,C=BD"
+
+      - name: Configure Signing
+        script: |
+          python3 << 'PYEOF'
+          import re
+          with open('android/app/build.gradle', 'r') as f:
+              gradle = f.read()
+          release_signing = '''
+              release {
+                  storeFile file("upload-keystore.jks")
+                  storePassword "Upload123"
+                  keyAlias "upload"
+                  keyPassword "Upload123"
+              }'''
+          gradle = gradle.replace(
+              'signingConfigs {',
+              'signingConfigs {' + release_signing, 1)
+          gradle = re.sub(
+              r'(release\s*\{[^}]*?)signingConfig signingConfigs\.debug',
+              r'\1signingConfig signingConfigs.release',
+              gradle, flags=re.DOTALL)
+          with open('android/app/build.gradle', 'w') as f:
+              f.write(gradle)
+          print("Done!")
+          PYEOF
+
+      - name: Build Release APK
+        script: |
+          export NODE_OPTIONS="--max-old-space-size=8192"
+          cd android
+          ./gradlew assembleRelease
+
+    artifacts:
+      - android/app/build/outputs/apk/release/*.apk
+
+    publishing:
+      email:
+        recipients:
+          - mtxdas@gmail.com
+        notify:
+          success: true
+          failure: true
