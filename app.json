@@ -35,16 +35,16 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "*.youtube.com" },
-            { "scheme": "https", "host": "*.youtu.be" },
-            { "scheme": "https", "host": "*.tiktok.com" },
-            { "scheme": "https", "host": "*.instagram.com" },
-            { "scheme": "https", "host": "*.facebook.com" },
-            { "scheme": "https", "host": "*.twitter.com" },
-            { "scheme": "https", "host": "*.x.com" },
-            { "scheme": "https", "host": "*.vimeo.com" },
-            { "scheme": "https", "host": "*.xhamster.com" },
-            { "scheme": "https", "host": "*.xnxx.com" }
+            { "scheme": "https", "host": "youtube.com" },
+            { "scheme": "https", "host": "youtu.be" },
+            { "scheme": "https", "host": "tiktok.com" },
+            { "scheme": "https", "host": "instagram.com" },
+            { "scheme": "https", "host": "facebook.com" },
+            { "scheme": "https", "host": "twitter.com" },
+            { "scheme": "https", "host": "x.com" },
+            { "scheme": "https", "host": "vimeo.com" },
+            { "scheme": "https", "host": "xhamster.com" },
+            { "scheme": "https", "host": "xnxx.com" }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
