@@ -1,4 +1,3 @@
-cat << 'EOF' > app.json
 {
   "expo": {
     "name": "MrDownload",
@@ -61,4 +60,3 @@ cat << 'EOF' > app.json
     }
   }
 }
-EOF
