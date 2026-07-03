@@ -1,3 +1,4 @@
+cat << 'EOF' > app.json
 {
   "expo": {
     "name": "MrDownload",
@@ -60,3 +61,4 @@
     }
   }
 }
+EOF
