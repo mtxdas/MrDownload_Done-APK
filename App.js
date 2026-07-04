@@ -8,7 +8,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@react-icons/vector-icons';
 import DownloadScreen from './DownloadScreen';
 import HistoryScreen from './HistoryScreen';
 import PlatformsScreen from './PlatformsScreen';
@@ -16,13 +16,13 @@ import SettingsScreen from './SettingsScreen';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 
 const COLORS = {
-  bg: '         
+  bg: '#0a0818',         
   bgMid: '#0d0b20',
-  bgDark: '         
+  bgDark: '#05040c',         
   purple: '#7c3aed',
-  text: '         
+  text: '#ffffff',         
   border: '#1e1b4b',
-  muted: '         
+  muted: '#6b7280',         
 };
 
 const Tab = createBottomTabNavigator();
@@ -32,7 +32,6 @@ const INITIAL_HISTORY = [
   { id: 3, platform: 'instagram', title: 'Instagram Reel', quality: 'MP3 Audio', size: '4MB', time: '10 min ago' },
 ];
 
-                                                                                                                 
 function AnnouncementBanner() {
   const { adminSettings } = useSettings();
   if (!adminSettings.showAnnouncement || !adminSettings.announcement) return null;
@@ -48,7 +47,7 @@ function MaintenanceScreen() {
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <Text style={{ fontSize: 56, marginBottom: 16 }}>🔧</Text>
-      <Text style={{ fontSize: 20, fontWeight: '800', color: '                                                   
+      <Text style={{ fontSize: 20, fontWeight: '800', color: COLORS.text, marginBottom: 8 }}>সংযোজন/রক্ষণাবেক্ষণ চলছে</Text>
       <Text style={{ fontSize: 14, color: '#6b7280', textAlign: 'center', lineHeight: 22 }}> অ্যাপটি এই মুহূর্তে রক্ষণাবেক্ষণে আছে।{'\n'} অনুগ্রহ করে কিছুক্ষণ পরে আবার চেষ্টা করুন। </Text>
     </View>
   );
@@ -120,7 +119,7 @@ function InnerApp() {
               )}
             </Tab.Screen>
 
-            {/* ── Settings Tab (নতুন) ── */}
+            {/* ── Settings Tab ── */}
             <Tab.Screen name="Settings" options={{ tabBarLabel: '⚙️Settings🔐' }}>
               {() => (
                 <SafeAreaView style={{ flex: 1 }} edges={['top']}>
