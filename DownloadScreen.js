@@ -1,30 +1,28 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, ActivityIndicator, Alert,
+  StyleSheet, ActivityIndicator, Alert, ScrollView
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { COLORS } from './constants';
 
 export default function DownloadScreen({ onAddHistory }) {
   const [url, setUrl] = useState('');
-  const [loading, setLoading] = useState('');
-  const [progress, setProgress] = useState(0);
+  const [loading, setLoading] = useState(false);
 
-  const handleDownload = async (quality) => {
+  const handleDownload = async () => {
     if (!url.trim()) {
-      Alert.alert('ভুল', 'একটি লিংক দিন');
+      Alert.alert('ভুল', 'অনুগ্রহ করে একটি লিংক দিন');
       return;
     }
 
-    setLoading('fetching');
-    
-    // লিংক ক্লিন করা (টিকটকের বাড়তি প্যারামিটার মুছে ফেলা)
+    setLoading(true);
     const cleanUrl = url.trim().split('?')[0];
 
     try {
+      console.log("Fetching data for:", cleanUrl);
+      
       const response = await fetch('https://mrdownload-backend.onrender.com/v1/social/autolink', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32,51 +30,39 @@ export default function DownloadScreen({ onAddHistory }) {
       });
 
       const data = await response.json();
-      console.log("API Response:", data); // টার্মিনালে রেসপন্স দেখতে
+      console.log("API Response received");
 
       if (!data || !data.medias || data.medias.length === 0) {
-        Alert.alert('❌ ব্যর্থ', 'ভিডিও পাওয়া যায়নি। সার্ভার বা লিংক চেক করুন।');
-        setLoading('');
-        return;
+        throw new Error("No media found");
       }
 
-      let selected = data.medias[0];
-      // কোয়ালিটি ফিল্টার
-      if (quality === 'MP3 Audio') {
-        const audio = data.medias.find(m => m.extension === 'mp3' || m.type === 'audio');
-        if (audio) selected = audio;
-      }
-
-      const videoUrl = selected.url || selected.link;
+      // ভিডিও URL বের করা
+      const videoUrl = data.medias[0].url || data.medias[0].link;
       
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('অনুমতি প্রয়োজন', 'স্টোরেজ পারমিশন দিন');
-        setLoading('');
+        Alert.alert('অনুমতি প্রয়োজন', 'ভিডিও সেভ করার জন্য স্টোরেজ পারমিশন দিন');
+        setLoading(false);
         return;
       }
 
-      setLoading('downloading');
-      const filename = `MrDownload_${Date.now()}.${quality === 'MP3 Audio' ? 'mp3' : 'mp4'}`;
+      const filename = `Video_${Date.now()}.mp4`;
       const fileUri = FileSystem.documentDirectory + filename;
 
-      const downloadResumable = FileSystem.createDownloadResumable(videoUrl, fileUri, {}, (p) => {
-        setProgress(p.totalBytesWritten / p.totalBytesExpectedToWrite);
-      });
-
+      const downloadResumable = FileSystem.createDownloadResumable(videoUrl, fileUri);
       const { uri } = await downloadResumable.downloadAsync();
+
       const asset = await MediaLibrary.createAssetAsync(uri);
       await MediaLibrary.createAlbumAsync('MrDownload', asset, false);
 
-      Alert.alert('✅ সফল', 'গ্যালারিতে সেভ হয়েছে!');
+      Alert.alert('✅ সফল', 'ভিডিও গ্যালারিতে সেভ হয়েছে!');
       onAddHistory?.({ url: cleanUrl, title: data.title || 'Video', date: new Date() });
       
     } catch (error) {
-      console.log("Full Error:", error);
-      Alert.alert('❌ এরর', 'সার্ভারে সংযোগ করা যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।');
+      console.error("Download Error:", error);
+      Alert.alert('❌ ব্যর্থ', 'ভিডিওটি ডাউনলোড করা সম্ভব হয়নি। লিংকটি সঠিক কিনা নিশ্চিত করুন।');
     } finally {
-      setLoading('');
-      setProgress(0);
+      setLoading(false);
     }
   };
 
@@ -84,25 +70,29 @@ export default function DownloadScreen({ onAddHistory }) {
     <ScrollView style={styles.container}>
       <TextInput
         style={styles.input}
-        placeholder="ভিডিও লিংক দিন..."
-        placeholderTextColor={COLORS.muted}
+        placeholder="টিকটক লিংক এখানে দিন..."
+        placeholderTextColor="#888"
         value={url}
         onChangeText={setUrl}
       />
-      <TouchableOpacity style={styles.button} onPress={() => handleDownload('HD')}>
-        <Text style={styles.buttonText}>
-          {loading === 'fetching' ? <ActivityIndicator color="#fff" /> : 'ডাউনলোড (HD)'}
-        </Text>
+      <TouchableOpacity 
+        style={styles.button} 
+        onPress={handleDownload}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>ডাউনলোড শুরু করুন</Text>
+        )}
       </TouchableOpacity>
-      {loading === 'downloading' && <Text style={styles.progressText}>ডাউনলোড হচ্ছে: {Math.round(progress * 100)}%</Text>}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg, padding: 20 },
-  input: { backgroundColor: COLORS.card, color: '#fff', padding: 15, borderRadius: 10, marginBottom: 15 },
-  button: { backgroundColor: COLORS.green, padding: 15, borderRadius: 10, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
-  progressText: { color: '#fff', textAlign: 'center', marginTop: 10 }
+  container: { flex: 1, backgroundColor: '#0a0818', padding: 20 },
+  input: { backgroundColor: '#151228', color: '#fff', padding: 15, borderRadius: 10, marginBottom: 20 },
+  button: { backgroundColor: '#10b981', padding: 15, borderRadius: 10, alignItems: 'center' },
+  buttonText: { color: '#fff', fontWeight: 'bold' }
 });
