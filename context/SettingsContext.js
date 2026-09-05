@@ -12,7 +12,7 @@ import React, { createContext, useContext, useState } from 'react';
 export const ADMIN_CREDENTIALS = {
   username : 'mtxdas',
   email    : 'mtxdas@gmail.com',
-  phone    : '01612909085',
+  phone    : '01600055255',
   password : 'MithunDas420',
 };
 
@@ -44,7 +44,7 @@ export function SettingsProvider({ children }) {
     maxDownloadsPerDay : 50,          // দৈনিক ডাউনলোড সীমা
     announcement       : '',          // ইউজারদের জন্য নোটিশ
     showAnnouncement   : false,       // নোটিশ দেখাবে কিনা
-    apiUrl             : 'https://api.mrdownload.com/v1',
+    apiUrl             : http://localhost:3000/v1',
     apiTimeout         : 30,          // seconds
     allowedQualities   : ['1080p FHD', '720p HD', '480p SD', 'MP3 Audio'],
 
