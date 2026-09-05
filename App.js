@@ -93,7 +93,7 @@ function InnerApp() {
             })}
           >
             {/* ── Download Tab ── */}
-            <Tab.Screen name="Download" options={{ tabBarLabel: '📲Download⬇' }}>
+            <Tab.Screen name="Download" options={{ tabBarLabel: 'Download' }}>
               {() => (
                 <SafeAreaView style={{ flex: 1 }} edges={['top']}>
                   {adminSettings.maintenanceMode ? <MaintenanceScreen /> : <DownloadScreen onAddHistory={addHistory} />}
@@ -102,7 +102,7 @@ function InnerApp() {
             </Tab.Screen>
 
             {/* ── History Tab ── */}
-            <Tab.Screen name="History" options={{ tabBarLabel: '📋History📑' }}>
+            <Tab.Screen name="History" options={{ tabBarLabel: 'History' }}>
               {() => (
                 <SafeAreaView style={{ flex: 1 }} edges={['top']}>
                   <HistoryScreen history={history} onRemove={removeHistory} onClear={clearHistory} />
@@ -111,7 +111,7 @@ function InnerApp() {
             </Tab.Screen>
 
             {/* ── Platforms Tab ── */}
-            <Tab.Screen name="Platforms" options={{ tabBarLabel: '📡Platforms🌐' }}>
+            <Tab.Screen name="Platforms" options={{ tabBarLabel: 'Platforms' }}>
               {() => (
                 <SafeAreaView style={{ flex: 1 }} edges={['top']}>
                   <PlatformsScreen />
@@ -120,7 +120,7 @@ function InnerApp() {
             </Tab.Screen>
 
             {/* ── Settings Tab ── */}
-            <Tab.Screen name="Settings" options={{ tabBarLabel: '⚙️Settings🔐' }}>
+            <Tab.Screen name="Settings" options={{ tabBarLabel: 'Settings' }}>
               {() => (
                 <SafeAreaView style={{ flex: 1 }} edges={['top']}>
                   <SettingsScreen />
