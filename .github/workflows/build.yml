@@ -33,7 +33,21 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Check Project Structure
+      - name: Setup EAS CLI and Expo
         run: |
-          ls -la
-          find . -maxdepth 2 -not -path '*/.*'
+          npm install -g eas-cli
+          npx expo prebuild --platform android
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build Android APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
