@@ -31,7 +31,9 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Dependencies
-        run: npm install
+        run: |
+          npm install
+          npm install react-native-vector-icons
 
       - name: Prebuild Android Project
         run: npx expo prebuild --platform android --clean
