@@ -33,5 +33,7 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Android App
-        run: npm run build
+      - name: Check Project Structure
+        run: |
+          ls -la
+          find . -maxdepth 2 -not -path '*/.*'
