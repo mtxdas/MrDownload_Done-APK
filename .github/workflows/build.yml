@@ -34,9 +34,7 @@ jobs:
         run: npm install
 
       - name: Make gradlew executable
-        run: chmod +x android/gradlew
+        run: chmod +x gradlew
 
       - name: Build Android App
-        run: |
-          cd android
-          ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace
