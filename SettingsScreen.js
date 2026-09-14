@@ -9,12 +9,11 @@ import {
   Alert,
   Linking,
   Keyboard,
-  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-// Render Backend URL (যাতে localhost-এর ঝামেলা না থাকে)
-const DEFAULT_API_URL = 'https://mrdownload-apk.onrender.com';
+// Render Backend Server Base URL
+const API_BASE_URL = 'https://mrdownload-apk.onrender.com';
 
 const COLORS = {
   bg: '#0a0818',
@@ -26,15 +25,9 @@ const COLORS = {
   green: '#10b981',
 };
 
-export default function DownloadScreen({ onDownloadSuccess, customApiUrl }) {
+export default function DownloadScreen({ onDownloadSuccess }) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const [downloadFormats, setDownloadFormats] = useState([]);
-  const [videoTitle, setVideoTitle] = useState('');
-
-  const baseUrl = (customApiUrl && !customApiUrl.includes('localhost')) 
-    ? customApiUrl 
-    : DEFAULT_API_URL;
 
   const detectPlatform = (link) => {
     const l = link.toLowerCase();
@@ -43,10 +36,13 @@ export default function DownloadScreen({ onDownloadSuccess, customApiUrl }) {
     if (l.includes('instagram.com')) return 'instagram';
     if (l.includes('facebook.com') || l.includes('fb.watch')) return 'facebook';
     if (l.includes('twitter.com') || l.includes('x.com')) return 'twitter';
+    if (l.includes('vimeo.com')) return 'vimeo';
+    if (l.includes('xhamster.com')) return 'xhamster';
+    if (l.includes('xnxx.com')) return 'xnxx';
     return 'video';
   };
 
-  const handleFetchMedia = async () => {
+  const handleDownload = async () => {
     if (!url || !url.trim()) {
       Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি সঠিক ভিডিও লিঙ্ক লিখুন।');
       return;
@@ -56,84 +52,75 @@ export default function DownloadScreen({ onDownloadSuccess, customApiUrl }) {
     const platform = detectPlatform(cleanUrl);
 
     setLoading(true);
-    setDownloadFormats([]);
-    setVideoTitle('');
     Keyboard.dismiss();
 
     try {
-      let data = null;
+      // ১. Render Backend-এ ডাউনলোডের রিকোয়েস্ট পাঠানো
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: cleanUrl, platform }),
+      });
 
-      // ১. প্রথমে আপনার রেন্ডার সার্ভারে রিকোয়েস্ট পাঠানো
-      try {
-        const response = await fetch(`${baseUrl}/api/download`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: cleanUrl, platform }),
-        });
-        if (response.ok) {
-          data = await response.json();
+      const data = await response.json();
+
+      if (response.ok && data && (data.downloadUrl || data.url)) {
+        const fileUrl = data.downloadUrl || data.url;
+        await Linking.openURL(fileUrl);
+
+        if (onDownloadSuccess) {
+          onDownloadSuccess({
+            id: Date.now(),
+            platform: platform,
+            title: data.title || `${platform.toUpperCase()} Video`,
+            quality: data.quality || 'HD',
+            size: data.size || 'Auto',
+            time: 'এখনই',
+          });
         }
-      } catch (e) {
-        console.log('Render Server Fail, trying Cobalt API...');
-      }
-
-      // ২. রেন্ডার না কাজ করলে সরাসরি Cobalt API থেকে ডেটা ফেচ করা
-      if (!data || (!data.downloadUrl && !data.url && !data.picker)) {
-        const cobaltRes = await fetch('https://co.wuk.sh/api/json', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ url: cleanUrl }),
-        });
-        data = await cobaltRes.json();
-      }
-
-      // ৩. রেজাল্ট প্রসেসিং
-      if (data.url || data.downloadUrl) {
-        const finalUrl = data.url || data.downloadUrl;
-        setDownloadFormats([{ quality: 'HD Quality (Direct File)', url: finalUrl }]);
-        setVideoTitle(data.filename || `${platform.toUpperCase()} Video`);
-      } else if (data.picker && Array.isArray(data.picker)) {
-        const formats = data.picker.map((item, index) => ({
-          quality: item.quality || item.type || `Quality ${index + 1}`,
-          url: item.url,
-        }));
-        setDownloadFormats(formats);
-        setVideoTitle(`${platform.toUpperCase()} Video`);
       } else {
-        Alert.alert('ব্যর্থ', 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি সঠিক কিনা নিশ্চিত করুন।');
+        // ২. Render সার্ভারে না পাওয়া গেলে রিডাইরেক্ট ফলব্যাক
+        let targetUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
+
+        if (platform === 'tiktok') {
+          targetUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
+        } else if (platform === 'youtube' || platform === 'facebook') {
+          targetUrl = `https://savefrom.net/#url=${encodeURIComponent(cleanUrl)}`;
+        }
+
+        await Linking.openURL(targetUrl);
+
+        if (onDownloadSuccess) {
+          onDownloadSuccess({
+            id: Date.now(),
+            platform: platform,
+            title: `${platform.toUpperCase()} Video`,
+            quality: 'HD',
+            size: 'Auto',
+            time: 'এখনই',
+          });
+        }
       }
     } catch (error) {
-      Alert.alert('ব্যর্থ', 'নেটওয়ার্ক সমস্যা অথবা সার্ভার সাড়া দিচ্ছে না।');
+      // ৩. নেটওয়ার্ক ত্রুটি হলে ওয়েবে ওপেন
+      try {
+        let fallbackUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
+        if (platform === 'tiktok') {
+          fallbackUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
+        }
+        await Linking.openURL(fallbackUrl);
+      } catch (err) {
+        Alert.alert('ব্যর্থ', 'ডাউনলোড প্রসেস করা সম্ভব হয়নি। আবার চেষ্টা করুন।');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const startDirectDownload = async (fileUrl, quality) => {
-    try {
-      const platform = detectPlatform(url);
-      await Linking.openURL(fileUrl);
-
-      if (onDownloadSuccess) {
-        onDownloadSuccess({
-          id: Date.now(),
-          platform: platform,
-          title: videoTitle || `${platform.toUpperCase()} Video`,
-          quality: quality || 'HD',
-          size: 'Auto',
-          time: 'এখনই',
-        });
-      }
-    } catch (err) {
-      Alert.alert('ত্রুটি', 'ডাউনলোড শুরু করা সম্ভব হয়নি।');
-    }
-  };
-
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.appTitle}>MR DOWNLOAD</Text>
         <Text style={styles.subtitle}>যেকোনো সোশ্যাল মিডিয়া ভিডিও ডাউনলোড করুন</Text>
@@ -146,15 +133,12 @@ export default function DownloadScreen({ onDownloadSuccess, customApiUrl }) {
           placeholder="ভিডিও লিংক পেস্ট করুন..."
           placeholderTextColor={COLORS.muted}
           value={url}
-          onChangeText={(text) => {
-            setUrl(text);
-            if (downloadFormats.length > 0) setDownloadFormats([]);
-          }}
+          onChangeText={setUrl}
           autoCapitalize="none"
           autoCorrect={false}
         />
         {url.length > 0 && (
-          <TouchableOpacity onPress={() => { setUrl(''); setDownloadFormats([]); }}>
+          <TouchableOpacity onPress={() => setUrl('')}>
             <Ionicons name="close-circle" size={20} color={COLORS.muted} />
           </TouchableOpacity>
         )}
@@ -162,7 +146,7 @@ export default function DownloadScreen({ onDownloadSuccess, customApiUrl }) {
 
       <TouchableOpacity
         style={[styles.downloadBtn, loading && { opacity: 0.7 }]}
-        onPress={handleFetchMedia}
+        onPress={handleDownload}
         disabled={loading}
       >
         {loading ? (
@@ -171,36 +155,16 @@ export default function DownloadScreen({ onDownloadSuccess, customApiUrl }) {
           <Text style={styles.downloadBtnText}>ডাউনলোড শুরু করুন</Text>
         )}
       </TouchableOpacity>
-
-      {downloadFormats.length > 0 && (
-        <View style={styles.formatContainer}>
-          <Text style={styles.formatTitle}>ভিডিওটি ডিরেক্ট ডাউনলোড করুন:</Text>
-          {downloadFormats.map((item, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.formatCard}
-              onPress={() => startDirectDownload(item.url, item.quality)}
-            >
-              <View style={styles.formatInfo}>
-                <Ionicons name="download-outline" size={22} color={COLORS.green} />
-                <Text style={styles.formatText}>{item.quality}</Text>
-              </View>
-              <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} />
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
+    flex: 1,
     backgroundColor: COLORS.bg,
     paddingHorizontal: 20,
     justifyContent: 'center',
-    paddingVertical: 40,
   },
   header: {
     alignItems: 'center',
@@ -245,40 +209,5 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  formatContainer: {
-    marginTop: 25,
-    backgroundColor: COLORS.card,
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  formatTitle: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-  formatCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.bg,
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  formatInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  formatText: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 10,
   },
 });
