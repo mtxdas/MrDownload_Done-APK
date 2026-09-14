@@ -9,6 +9,7 @@ import {
   Alert,
   Linking,
   Keyboard,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -28,6 +29,8 @@ const COLORS = {
 export default function DownloadScreen({ onDownloadSuccess }) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
+  const [downloadFormats, setDownloadFormats] = useState([]);
+  const [videoTitle, setVideoTitle] = useState('');
 
   const detectPlatform = (link) => {
     const l = link.toLowerCase();
@@ -42,7 +45,8 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     return 'video';
   };
 
-  const handleDownload = async () => {
+  // ১. Cobalt / Backend থেকে ফাইল বা ফরম্যাটের অপশন ফেচ করার ফাংশন
+  const handleFetchMedia = async () => {
     if (!url || !url.trim()) {
       Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি সঠিক ভিডিও লিঙ্ক লিখুন।');
       return;
@@ -52,11 +56,13 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     const platform = detectPlatform(cleanUrl);
 
     setLoading(true);
+    setDownloadFormats([]);
+    setVideoTitle('');
     Keyboard.dismiss();
 
     try {
-      // ১. Render Backend-এ ডাউনলোডের রিকোয়েস্ট পাঠানো
-      const response = await fetch(`${API_BASE_URL}/api/download`, {
+      // প্রথমে নিজস্ব Render Backend-এ চেষ্টা
+      let response = await fetch(`${API_BASE_URL}/api/download`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -64,63 +70,71 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         body: JSON.stringify({ url: cleanUrl, platform }),
       });
 
-      const data = await response.json();
+      let data = await response.json();
 
-      if (response.ok && data && (data.downloadUrl || data.url)) {
-        const fileUrl = data.downloadUrl || data.url;
-        await Linking.openURL(fileUrl);
+      // Render সার্ভারে না পাওয়া গেলে সরাসরি Cobalt API-তে প্রসেস করা
+      if (!response.ok || (!data.downloadUrl && !data.url && !data.picker)) {
+        const cobaltRes = await fetch('https://co.wuk.sh/api/json', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: cleanUrl,
+            vQuality: 'max',
+          }),
+        });
+        data = await cobaltRes.json();
+      }
 
-        if (onDownloadSuccess) {
-          onDownloadSuccess({
-            id: Date.now(),
-            platform: platform,
-            title: data.title || `${platform.toUpperCase()} Video`,
-            quality: data.quality || 'HD',
-            size: data.size || 'Auto',
-            time: 'এখনই',
-          });
-        }
+      // যদি একক ডাউনলোড লিঙ্ক পাওয়া যায়
+      if (data.url || data.downloadUrl) {
+        const finalUrl = data.url || data.downloadUrl;
+        setDownloadFormats([{ quality: 'HD / Auto Quality', url: finalUrl }]);
+        setVideoTitle(data.filename || `${platform.toUpperCase()} Video`);
+      } 
+      // যদি একাধিক কোয়ালিটি/ফরম্যাট থাকে (Picker Mode)
+      else if (data.picker && Array.isArray(data.picker)) {
+        const formats = data.picker.map((item, index) => ({
+          quality: item.quality || item.type || `Option ${index + 1}`,
+          url: item.url,
+        }));
+        setDownloadFormats(formats);
+        setVideoTitle(`${platform.toUpperCase()} Video`);
       } else {
-        // ২. Render সার্ভারে না পাওয়া গেলে স্মার্ট রিডাইরেক্ট ফলব্যাক
-        let targetUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
-
-        if (platform === 'tiktok') {
-          targetUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
-        } else if (platform === 'youtube' || platform === 'facebook') {
-          targetUrl = `https://savefrom.net/#url=${encodeURIComponent(cleanUrl)}`;
-        }
-
-        await Linking.openURL(targetUrl);
-
-        if (onDownloadSuccess) {
-          onDownloadSuccess({
-            id: Date.now(),
-            platform: platform,
-            title: `${platform.toUpperCase()} Video`,
-            quality: 'HD',
-            size: 'Auto',
-            time: 'এখনই',
-          });
-        }
+        Alert.alert('ত্রুটি', 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি আবার পরীক্ষা করুন।');
       }
     } catch (error) {
-      // ৩. নেটওয়ার্ক ত্রুটি বা স্লিপ মোডের ক্ষেত্রে ওয়েবে ওপেন
-      try {
-        let fallbackUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
-        if (platform === 'tiktok') {
-          fallbackUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
-        }
-        await Linking.openURL(fallbackUrl);
-      } catch (err) {
-        Alert.alert('ব্যর্থ', 'ডাউনলোড প্রসেস করা সম্ভব হয়নি। আবার চেষ্টা করুন।');
-      }
+      Alert.alert('ব্যর্থ', 'নেটওয়ার্ক সমস্যা অথবা সার্ভার সাড়া দিচ্ছে না।');
     } finally {
       setLoading(false);
     }
   };
 
+  // ২. নির্দিষ্ট ফরম্যাটের ওপর ক্লিক করলে সরাসরি ডাউনলোডার সক্রিয় করার ফাংশন
+  const startDirectDownload = async (fileUrl, quality) => {
+    try {
+      const platform = detectPlatform(url);
+      await Linking.openURL(fileUrl);
+
+      if (onDownloadSuccess) {
+        onDownloadSuccess({
+          id: Date.now(),
+          platform: platform,
+          title: videoTitle || `${platform.toUpperCase()} Video`,
+          quality: quality || 'HD',
+          size: 'Auto',
+          time: 'এখনই',
+        });
+      }
+    } catch (err) {
+      Alert.alert('ত্রুটি', 'ডাউনলোড শুরু করা সম্ভব হয়নি।');
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.appTitle}>MR DOWNLOAD</Text>
         <Text style={styles.subtitle}>যেকোনো সোশ্যাল মিডিয়া ভিডিও ডাউনলোড করুন</Text>
@@ -133,12 +147,15 @@ export default function DownloadScreen({ onDownloadSuccess }) {
           placeholder="ভিডিও লিংক পেস্ট করুন..."
           placeholderTextColor={COLORS.muted}
           value={url}
-          onChangeText={setUrl}
+          onChangeText={(text) => {
+            setUrl(text);
+            if (downloadFormats.length > 0) setDownloadFormats([]);
+          }}
           autoCapitalize="none"
           autoCorrect={false}
         />
         {url.length > 0 && (
-          <TouchableOpacity onPress={() => setUrl('')}>
+          <TouchableOpacity onPress={() => { setUrl(''); setDownloadFormats([]); }}>
             <Ionicons name="close-circle" size={20} color={COLORS.muted} />
           </TouchableOpacity>
         )}
@@ -146,25 +163,46 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       <TouchableOpacity
         style={[styles.downloadBtn, loading && { opacity: 0.7 }]}
-        onPress={handleDownload}
+        onPress={handleFetchMedia}
         disabled={loading}
       >
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.downloadBtnText}>ডাউনলোড শুরু করুন</Text>
+          <Text style={styles.downloadBtnText}>ভিডিও ফরম্যাট ফেচ করুন</Text>
         )}
       </TouchableOpacity>
-    </View>
+
+      {/* ফরম্যাট ও ডাউনলোডের অপশনসমূহ (অ্যাপের ভেতরেই দেখাবে) */}
+      {downloadFormats.length > 0 && (
+        <View style={styles.formatContainer}>
+          <Text style={styles.formatTitle}>ডাউনলোড ফরম্যাট সিলেক্ট করুন:</Text>
+          {downloadFormats.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.formatCard}
+              onPress={() => startDirectDownload(item.url, item.quality)}
+            >
+              <View style={styles.formatInfo}>
+                <Ionicons name="download-outline" size={22} color={COLORS.green} />
+                <Text style={styles.formatText}>{item.quality}</Text>
+              </View>
+              <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: COLORS.bg,
     paddingHorizontal: 20,
     justifyContent: 'center',
+    paddingVertical: 40,
   },
   header: {
     alignItems: 'center',
@@ -198,7 +236,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   downloadBtn: {
-    backgroundColor: COLORS.green,
+    backgroundColor: COLORS.purple,
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
@@ -209,5 +247,40 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  formatContainer: {
+    marginTop: 25,
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  formatTitle: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  formatCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.bg,
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  formatInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  formatText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 10,
   },
 });
