@@ -1,7 +1,6 @@
 const express = require('express');
+const { exec } = require('child_process');
 const cors = require('cors');
-const axios = require('axios');
-require('dotenv').config();
 
 const app = express();
 app.use(cors());
@@ -10,25 +9,44 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('MR Download Server is Running!');
+  res.send('Multi-Platform Video Downloader Server is Running!');
 });
 
-// Instagram Downloader API Endpoint
-app.post('/api/download', async (req, res) => {
-    const { url } = req.body;
+// Video Downloader Endpoint
+app.post('/download', (req, res) => {
+  const videoUrl = req.body.url;
 
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
+  if (!videoUrl) {
+    return res.status(400).json({ success: false, message: 'URL is required' });
+  }
+
+  // Command to fetch direct download link using yt-dlp
+  const command = `yt-dlp -g -f best "${videoUrl}"`;
+
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Exec Error: ${error.message}`);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to process video link.',
+        error: error.message
+      });
     }
 
-    try {
-        // এখানে আপনার Instagram API রিকোয়েস্ট লজিক বসবে
-        res.json({ message: 'Request received', url });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to process request' });
+    if (stderr) {
+      console.warn(`Stderr: ${stderr}`);
     }
+
+    const downloadUrl = stdout.trim();
+
+    res.json({
+      success: true,
+      message: 'Link extracted successfully',
+      download_url: downloadUrl
+    });
+  });
 });
 
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
