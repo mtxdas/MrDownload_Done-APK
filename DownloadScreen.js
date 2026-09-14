@@ -17,7 +17,6 @@ const COLORS = {
   card: '#151228',
   border: '#1e1b4b',
   purple: '#7c3aed',
-  purpleDark: '#6d28d9',
   text: '#ffffff',
   muted: '#6b7280',
   green: '#10b981',
@@ -27,7 +26,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // লিঙ্ক থেকে প্ল্যাটফর্ম শনাক্ত করার ফাংশন
   const detectPlatform = (link) => {
     const l = link.toLowerCase();
     if (l.includes('youtube.com') || l.includes('youtu.be')) return 'youtube';
@@ -38,7 +36,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     if (l.includes('vimeo.com')) return 'vimeo';
     if (l.includes('xhamster.com')) return 'xhamster';
     if (l.includes('xnxx.com')) return 'xnxx';
-    return 'unknown';
+    return 'video';
   };
 
   const handleDownload = async () => {
@@ -54,54 +52,33 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     Keyboard.dismiss();
 
     try {
-      // বহিরাগত ফ্রি ডাউনলোডার প্রক্সি API ব্যবহার করা হচ্ছে যা শর্ট লিংক রিডাইরেক্ট সাপোর্ট করে
-      let targetDownloadUrl = '';
+      // প্ল্যাটফর্ম অনুযায়ী সরাসরি ইউনিভার্সাল ডাউনলোডার পোর্টালে রিডাইরেক্ট
+      let targetUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
 
       if (platform === 'tiktok') {
-        // TikWM API দিয়ে TikTok ওয়াটারমার্ক ছাড়া ভিডিও লিংক আনা
-        const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}`);
-        const json = await res.json();
-        if (json && json.data && json.data.play) {
-          targetDownloadUrl = json.data.play;
-        } else {
-          // বিকল্প API রিকোয়েস্ট
-          targetDownloadUrl = `https://cobalt.tools/api/json`;
+        targetUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
+      } else if (platform === 'youtube' || platform === 'facebook') {
+        targetUrl = `https://savefrom.net/#url=${encodeURIComponent(cleanUrl)}`;
+      }
+
+      const supported = await Linking.canOpenURL(targetUrl);
+      if (supported) {
+        await Linking.openURL(targetUrl);
+        if (onDownloadSuccess) {
+          onDownloadSuccess({
+            id: Date.now(),
+            platform: platform,
+            title: `${platform.toUpperCase()} Video`,
+            quality: 'HD',
+            size: 'Auto',
+            time: 'এখনই',
+          });
         }
       } else {
-        // অন্যান্য প্ল্যাটফর্মের জন্য সরাসরি সেভার সার্ভিস রিডাইরেক্ট
-        targetDownloadUrl = cleanUrl;
-      }
-
-      // হিস্ট্রিতে যুক্ত করা
-      if (onDownloadSuccess) {
-        onDownloadSuccess({
-          id: Date.now(),
-          platform: platform,
-          title: `${platform.toUpperCase()} Video`,
-          quality: 'HD / Original',
-          size: 'Auto',
-          time: 'এখনই',
-        });
-      }
-
-      // যদি ডিরেক্ট লিংক পাওয়া যায় তবে ব্রাউজারে বা ডাউনলোডারে ওপেন করা
-      if (targetDownloadUrl && targetDownloadUrl.startsWith('http')) {
-        await Linking.openURL(targetDownloadUrl);
-        Alert.alert('সফল', 'ভিডিওটি ডাউনলোডের জন্য প্রক্রিয়াকরণ শুরু হয়েছে।');
-      } else {
-        // ফলব্যাক ডাউনলোডার ওয়েবে ওপেন
-        const fallbackUrl = `https://cobalt.tools/`;
-        await Linking.openURL(fallbackUrl);
-        Alert.alert('তথ্য', 'ভিডিওটি ডাউনলোড করতে ডাউনলোডার পেজ খোলা হয়েছে।');
+        Alert.alert('ত্রুটি', 'লিঙ্কটি ব্রাউজারে ওপেন করা যাচ্ছে না।');
       }
     } catch (error) {
-      // নেটওয়ার্ক ব্যর্থতায় ফ্রি ওয়েব সার্ভিস দিয়ে ব্যাকআপ ডাউনলোডের ব্যবস্থা
-      try {
-        const fallbackWeb = `https://savefrom.net/`;
-        await Linking.openURL(fallbackWeb);
-      } catch (err) {
-        Alert.alert('ব্যর্থ', 'ভিডিওটি ডাউনলোড করা সম্ভব হয়নি। লিঙ্কটি সঠিক কিনা নিশ্চিত করুন।');
-      }
+      Alert.alert('ব্যর্থ', 'ডাউনলোড প্রসেস করা সম্ভব হয়নি। আবার চেষ্টা করুন।');
     } finally {
       setLoading(false);
     }
