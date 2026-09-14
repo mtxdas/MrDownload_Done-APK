@@ -1,23 +1,25 @@
 name: Build Android APK
+
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Install dependencies
-        run: npm install
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -28,14 +30,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Dependencies
+        run: npm install
+
       - name: Build Android App
         run: |
           cd android
-          chmod +x gradlew
           ./gradlew assembleRelease
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: android/app/build/outputs/apk/release/app-release.apk
