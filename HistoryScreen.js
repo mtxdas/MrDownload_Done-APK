@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 const COLORS = {
@@ -60,13 +60,6 @@ export default function HistoryScreen({ history, onRemove, onClear }) {
         ListEmptyComponent={
           <Text style={styles.emptyText}>কোনো হিস্ট্রি নেই</Text>
         }
-      />
-
-      {/* Watermark - একদম মাঝখানে */}
-      <Image 
-        source={require('../assets/watermark.png')} 
-        style={styles.watermark}
-        resizeMode="contain"
       />
     </View>
   );
@@ -156,15 +149,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 40,
     fontSize: 14,
-  },
-  watermark: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -100 }, { translateY: -100 }],
-    width: 200,
-    height: 200,
-    opacity: 0.1,
-    zIndex: -1,
   },
 });
