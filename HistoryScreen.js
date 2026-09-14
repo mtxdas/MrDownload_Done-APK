@@ -13,16 +13,37 @@ const COLORS = {
 };
 
 export default function HistoryScreen({ history, onRemove, onClear }) {
+  const getPlatformIcon = (platform) => {
+    switch (platform) {
+      case 'youtube':
+        return <Ionicons name="logo-youtube" size={24} color="#ff0000" />;
+      case 'tiktok':
+        return <Ionicons name="musical-notes" size={24} color="#ffffff" />;
+      case 'instagram':
+        return <Ionicons name="logo-instagram" size={24} color="#e1306c" />;
+      case 'facebook':
+        return <Ionicons name="logo-facebook" size={24} color="#1877f2" />;
+      case 'twitter':
+        return <Ionicons name="logo-twitter" size={24} color="#1da1f2" />;
+      case 'vimeo':
+        return <Ionicons name="videocam" size={24} color="#1ab7ea" />;
+      case 'xhamster':
+        return <Ionicons name="play-circle" size={24} color="#ff9900" />;
+      case 'xnxx':
+        return <Ionicons name="caret-forward-circle" size={24} color="#f5c518" />;
+      default:
+        return <Ionicons name="film-outline" size={24} color="#8b5cf6" />;
+    }
+  };
+
   const renderItem = ({ item }) => (
     <View style={styles.card}>
       <View style={styles.iconBox}>
-        {item.platform === 'youtube' && <Ionicons name="logo-youtube" size={24} color="#ff0000" />}
-        {item.platform === 'tiktok' && <Ionicons name="musical-notes" size={24} color="#fff" />}
-        {item.platform === 'instagram' && <Ionicons name="logo-instagram" size={24} color="#e1306c" />}
+        {getPlatformIcon(item.platform)}
       </View>
       
       <View style={styles.info}>
-        <Text style={styles.title}>{item.title}</Text>
+        <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
         <Text style={styles.meta}>{item.quality} • {item.size} • {item.time}</Text>
       </View>
 
