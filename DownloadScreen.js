@@ -12,6 +12,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+// Render Backend Server Base URL
+const API_BASE_URL = 'https://mrdownload-apk.onrender.com';
+
 const COLORS = {
   bg: '#0a0818',
   card: '#151228',
@@ -52,18 +55,43 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     Keyboard.dismiss();
 
     try {
-      // প্ল্যাটফর্ম অনুযায়ী সরাসরি ইউনিভার্সাল ডাউনলোডার পোর্টালে রিডাইরেক্ট
-      let targetUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
+      // ১. Render Backend-এ ডাউনলোডের রিকোয়েস্ট পাঠানো
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: cleanUrl, platform }),
+      });
 
-      if (platform === 'tiktok') {
-        targetUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
-      } else if (platform === 'youtube' || platform === 'facebook') {
-        targetUrl = `https://savefrom.net/#url=${encodeURIComponent(cleanUrl)}`;
-      }
+      const data = await response.json();
 
-      const supported = await Linking.canOpenURL(targetUrl);
-      if (supported) {
+      if (response.ok && data && (data.downloadUrl || data.url)) {
+        const fileUrl = data.downloadUrl || data.url;
+        await Linking.openURL(fileUrl);
+
+        if (onDownloadSuccess) {
+          onDownloadSuccess({
+            id: Date.now(),
+            platform: platform,
+            title: data.title || `${platform.toUpperCase()} Video`,
+            quality: data.quality || 'HD',
+            size: data.size || 'Auto',
+            time: 'এখনই',
+          });
+        }
+      } else {
+        // ২. Render সার্ভারে না পাওয়া গেলে স্মার্ট রিডাইরেক্ট ফলব্যাক
+        let targetUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
+
+        if (platform === 'tiktok') {
+          targetUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
+        } else if (platform === 'youtube' || platform === 'facebook') {
+          targetUrl = `https://savefrom.net/#url=${encodeURIComponent(cleanUrl)}`;
+        }
+
         await Linking.openURL(targetUrl);
+
         if (onDownloadSuccess) {
           onDownloadSuccess({
             id: Date.now(),
@@ -74,11 +102,18 @@ export default function DownloadScreen({ onDownloadSuccess }) {
             time: 'এখনই',
           });
         }
-      } else {
-        Alert.alert('ত্রুটি', 'লিঙ্কটি ব্রাউজারে ওপেন করা যাচ্ছে না।');
       }
     } catch (error) {
-      Alert.alert('ব্যর্থ', 'ডাউনলোড প্রসেস করা সম্ভব হয়নি। আবার চেষ্টা করুন।');
+      // ৩. নেটওয়ার্ক ত্রুটি বা স্লিপ মোডের ক্ষেত্রে ওয়েবে ওপেন
+      try {
+        let fallbackUrl = `https://cobalt.tools/?url=${encodeURIComponent(cleanUrl)}`;
+        if (platform === 'tiktok') {
+          fallbackUrl = `https://ssstik.io/pt?url=${encodeURIComponent(cleanUrl)}`;
+        }
+        await Linking.openURL(fallbackUrl);
+      } catch (err) {
+        Alert.alert('ব্যর্থ', 'ডাউনলোড প্রসেস করা সম্ভব হয়নি। আবার চেষ্টা করুন।');
+      }
     } finally {
       setLoading(false);
     }
