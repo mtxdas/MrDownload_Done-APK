@@ -8,7 +8,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@react-icons/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import DownloadScreen from './DownloadScreen';
 import HistoryScreen from './HistoryScreen';
 import PlatformsScreen from './PlatformsScreen';
