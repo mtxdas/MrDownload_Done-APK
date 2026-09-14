@@ -44,7 +44,8 @@ export function SettingsProvider({ children }) {
     maxDownloadsPerDay : 50,          // দৈনিক ডাউনলোড সীমা
     announcement       : '',          // ইউজারদের জন্য নোটিশ
     showAnnouncement   : false,       // নোটিশ দেখাবে কিনা
-    apiUrl             : 'http://localhost:3000/v1',
+    apiUrl             : 'https://mrdownload-apk.onrender.com/v1',
+
     apiTimeout         : 30,          // seconds
     allowedQualities   : ['1080p FHD', '720p HD', '480p SD', 'MP3 Audio'],
 
