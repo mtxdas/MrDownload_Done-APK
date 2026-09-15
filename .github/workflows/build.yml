@@ -2,46 +2,52 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      - name: Setup Java JDK
-        uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
+          distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Dependencies
-        run: npm install
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Build Android Release APK
+      - name: Install Dependencies
         run: |
-          if [ -d "android" ]; then
-            cd android
-            chmod +x gradlew
-            ./gradlew assembleRelease --no-daemon
-          else
-            npx expo run:android --variant release || npx react-native run-android --mode=release
-          fi
+          npm install
+          npm install react-native-vector-icons
+
+      - name: Prebuild Android Project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build Android APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            app/build/outputs/apk/release/*.apk
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
