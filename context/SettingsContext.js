@@ -1,13 +1,11 @@
-
 // ============================================================
 //  FILE: context/SettingsContext.js
-//  GitHub এ   Mr.Download-main/context/  ফোল্ডার বানিয়ে রাখো
 // ============================================================
 
 import React, { createContext, useContext, useState } from 'react';
 
 // ──────────────────────────────────────────
-//  🔐 ADMIN CREDENTIALS  (শুধু Admin জানবে)
+//  🔐 ADMIN CREDENTIALS
 // ──────────────────────────────────────────
 export const ADMIN_CREDENTIALS = {
   username : 'mtxdas',
@@ -44,9 +42,9 @@ export function SettingsProvider({ children }) {
     maxDownloadsPerDay : 50,          // দৈনিক ডাউনলোড সীমা
     announcement       : '',          // ইউজারদের জন্য নোটিশ
     showAnnouncement   : false,       // নোটিশ দেখাবে কিনা
-    apiUrl             : 'https://mrdownload-apk.onrender.com/v1',
+    apiUrl             : 'https://mrdownload-apk.onrender.com/download', // 👈 সঠিকভাবে /download বসানো হয়েছে
 
-    apiTimeout         : 30,          // seconds
+    apiTimeout         : 90,          // 👈 বাড়িয়ে ৯০ সেকেন্ড করা হয়েছে
     allowedQualities   : ['1080p FHD', '720p HD', '480p SD', 'MP3 Audio'],
 
     // প্রতিটি platform enable/disable
