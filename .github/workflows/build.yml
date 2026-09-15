@@ -29,6 +29,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 8512546
 
       - name: Install Dependencies
         run: |
@@ -38,7 +40,7 @@ jobs:
       - name: Prebuild Android Project
         run: npx expo prebuild --platform android --clean
 
-      - name: Make gradlew executable
+      - name: Make gradle executable
         run: chmod +x android/gradlew
 
       - name: Build Android APK
