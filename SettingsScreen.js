@@ -23,7 +23,7 @@ const ADMIN_DEFAULTS = {
 
 // ── Backend Server Configuration ───────────────────────────
 const BACKEND_CONFIG = {
-  apiUrl: "https://mrdownload-api.onrender.com",
+  apiUrl: "https://mrdownload-apk.onrender.com",
   developer: "MithunDas,11KHAN,JESSORE",
   version: "v1.0.0",
 };
