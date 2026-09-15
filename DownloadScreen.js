@@ -45,7 +45,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     return 'video';
   };
 
-  // ১. Cobalt / Backend থেকে ফাইল বা ফরম্যাটের অপশন ফেচ করার ফাংশন
+  // ১. Backend থেকে ফাইল বা ফরম্যাটের অপশন ফেচ করার ফাংশন
   const handleFetchMedia = async () => {
     if (!url || !url.trim()) {
       Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি সঠিক ভিডিও লিঙ্ক লিখুন।');
@@ -61,19 +61,19 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     Keyboard.dismiss();
 
     try {
-      // প্রথমে নিজস্ব Render Backend-এ চেষ্টা
-     let response = await fetch(`${API_BASE_URL}/download`, {
+      // নিজস্ব Render Backend-এ সঠিকভাবে videoUrl পাঠানো
+      let response = await fetch(`${API_BASE_URL}/download`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: cleanUrl, platform }),
+        body: JSON.stringify({ videoUrl: cleanUrl }),
       });
 
       let data = await response.json();
 
-      // Render সার্ভারে না পাওয়া গেলে সরাসরি Cobalt API-তে প্রসেস করা
-      if (!response.ok || (!data.downloadUrl && !data.url && !data.picker)) {
+      // Render সার্ভারে সমস্যা হলে বা ডাউনলোড লিঙ্ক না পেলে Cobalt API-তে ট্রাই
+      if (!response.ok || (!data.download_url && !data.downloadUrl && !data.url && !data.picker)) {
         const cobaltRes = await fetch('https://co.wuk.sh/api/json', {
           method: 'POST',
           headers: {
@@ -88,13 +88,14 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         data = await cobaltRes.json();
       }
 
-      // যদি একক ডাউনলোড লিঙ্ক পাওয়া যায়
-      if (data.url || data.downloadUrl) {
-        const finalUrl = data.url || data.downloadUrl;
-        setDownloadFormats([{ quality: 'HD / Auto Quality', url: finalUrl }]);
+      // একক ডাউনলোড লিঙ্ক পাওয়ার ফিল্ড চেক
+      const finalUrl = data.download_url || data.downloadUrl || data.url;
+
+      if (finalUrl) {
+        setDownloadFormats([{ quality: 'HD / Best Quality', url: finalUrl }]);
         setVideoTitle(data.filename || `${platform.toUpperCase()} Video`);
       } 
-      // যদি একাধিক কোয়ালিটি/ফরম্যাট থাকে (Picker Mode)
+      // একাধিক কোয়ালিটি/ফরম্যাট থাকলে (Picker Mode)
       else if (data.picker && Array.isArray(data.picker)) {
         const formats = data.picker.map((item, index) => ({
           quality: item.quality || item.type || `Option ${index + 1}`,
@@ -103,7 +104,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         setDownloadFormats(formats);
         setVideoTitle(`${platform.toUpperCase()} Video`);
       } else {
-        Alert.alert('ত্রুটি', 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি আবার পরীক্ষা করুন।');
+        Alert.alert('ত্রুটি', data.message || 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি আবার পরীক্ষা করুন।');
       }
     } catch (error) {
       Alert.alert('ব্যর্থ', 'নেটওয়ার্ক সমস্যা অথবা সার্ভার সাড়া দিচ্ছে না।');
@@ -173,7 +174,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         )}
       </TouchableOpacity>
 
-      {/* ফরম্যাট ও ডাউনলোডের অপশনসমূহ (অ্যাপের ভেতরেই দেখাবে) */}
+      {/* ফরম্যাট ও ডাউনলোডের অপশনসমূহ */}
       {downloadFormats.length > 0 && (
         <View style={styles.formatContainer}>
           <Text style={styles.formatTitle}>ডাউনলোড ফরম্যাট সিলেক্ট করুন:</Text>
