@@ -37,6 +37,13 @@ const ADMIN_CREDENTIALS = {
   password: 'MithunDas420',
 };
 
+// Backend Server Configuration
+const BACKEND_CONFIG = {
+  apiUrl: 'https://mrdownload-apk.onrender.com',
+  developer: 'MithunDas,11KHAN,JESSORE',
+  version: 'v1.0.0',
+};
+
 export default function SettingsScreen() {
   // Settings States
   const [wifiOnly, setWifiOnly] = useState(false);
@@ -249,7 +256,7 @@ export default function SettingsScreen() {
               </View>
               <View>
                 <Text style={styles.rowLabel}>Download API URL</Text>
-                <Text style={styles.rowSubLabel}>https://mrdownload-apk.onrender.com</Text>
+                <Text style={styles.rowSubLabel}>{BACKEND_CONFIG.apiUrl}</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
@@ -516,7 +523,7 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.rowLabel}>App Version</Text>
           </View>
-          <Text style={styles.mutedValue}>v1.0.0</Text>
+          <Text style={styles.mutedValue}>{BACKEND_CONFIG.version}</Text>
         </View>
 
         <View style={styles.row}>
@@ -526,7 +533,7 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.rowLabel}>Developer</Text>
           </View>
-          <Text style={styles.mutedValue}>MithunDas,11KHAN,JESSORE</Text>
+          <Text style={styles.mutedValue}>{BACKEND_CONFIG.developer}</Text>
         </View>
 
         <TouchableOpacity style={styles.row}>
