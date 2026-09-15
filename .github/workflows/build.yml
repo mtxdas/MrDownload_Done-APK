@@ -28,14 +28,20 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Release APK
+      - name: Build Android Release APK
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          if [ -d "android" ]; then
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleRelease --no-daemon
+          else
+            npx expo run:android --variant release || npx react-native run-android --mode=release
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.apk
