@@ -62,7 +62,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
     try {
       // প্রথমে নিজস্ব Render Backend-এ চেষ্টা
-      let response = await fetch(`${API_BASE_URL}/api/download`, {
+     let response = await fetch(`${API_BASE_URL}/download`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
