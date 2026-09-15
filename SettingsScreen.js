@@ -330,13 +330,6 @@ export default function SettingsScreen() {
           right={<Text style={styles.valueTxt}>{BACKEND_CONFIG.developer}</Text>}
         />
         <View style={styles.divider} />
-        <SettingRow
-          icon="server"
-          iconColor="#3b82f6"
-          label="Backend Server"
-          right={<Text style={[styles.valueTxt, { fontSize: 11 }]}>{BACKEND_CONFIG.apiUrl}</Text>}
-        />
-        <View style={styles.divider} />
         <TouchableOpacity
           onPress={() => Alert.alert('⭐ ধন্যবাদ!', 'App রেটিং দিয়ে মতামত দেওয়ার জন্য ধন্যবাদ!')}
         >
