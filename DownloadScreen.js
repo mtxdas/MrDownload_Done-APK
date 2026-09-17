@@ -25,8 +25,10 @@ const COLORS = {
   green: '#10b981',
 };
 
-export default function DownloadScreen({ onDownloadSuccess }) {
-  const { adminSettings } = useSettings();
+export default function DownloadScreen(props) {
+  const settingsContext = useSettings();
+  const adminSettings = settingsContext ? settingsContext.adminSettings : null;
+
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [downloadFormats, setDownloadFormats] = useState([]);
@@ -37,30 +39,39 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
   const detectPlatform = (link) => {
     const l = link.toLowerCase();
-    if (l.includes('youtube.com') || l.includes('youtu.be')) return 'youtube';
-    if (l.includes('tiktok.com')) return 'tiktok';
-    if (l.includes('instagram.com')) return 'instagram';
-    if (l.includes('facebook.com') || l.includes('fb.watch')) return 'facebook';
-    if (l.includes('twitter.com') || l.includes('x.com')) return 'twitter';
-    if (l.includes('vimeo.com')) return 'vimeo';
+    if (l.indexOf('youtube.com') !== -1 || l.indexOf('youtu.be') !== -1) return 'youtube';
+    if (l.indexOf('tiktok.com') !== -1) return 'tiktok';
+    if (l.indexOf('instagram.com') !== -1) return 'instagram';
+    if (l.indexOf('facebook.com') !== -1 || l.indexOf('fb.watch') !== -1) return 'facebook';
+    if (l.indexOf('twitter.com') !== -1 || l.indexOf('x.com') !== -1) return 'twitter';
+    if (l.indexOf('vimeo.com') !== -1) return 'vimeo';
     return 'video';
   };
 
   const extractYoutubeId = (link) => {
     let videoId = '';
-    if (link.includes('v=')) {
-      videoId = link.split('v=')[1]?.split('&')[0];
-    } else if (link.includes('youtu.be/')) {
-      videoId = link.split('youtu.be/')[1]?.split('?')[0];
-    } else if (link.includes('shorts/')) {
-      videoId = link.split('shorts/')[1]?.split('?')[0];
+    if (link.indexOf('v=') !== -1) {
+      const parts = link.split('v=');
+      if (parts[1]) {
+        videoId = parts[1].split('&')[0];
+      }
+    } else if (link.indexOf('youtu.be/') !== -1) {
+      const parts = link.split('youtu.be/');
+      if (parts[1]) {
+        videoId = parts[1].split('?')[0];
+      }
+    } else if (link.indexOf('shorts/') !== -1) {
+      const parts = link.split('shorts/');
+      if (parts[1]) {
+        videoId = parts[1].split('?')[0];
+      }
     }
     return videoId;
   };
 
   const handleFetchMedia = async () => {
     if (!url || !url.trim()) {
-      Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি সঠিক ভিডিও লিঙ্ক লিখুন।');
+      Alert.alert('ত্রুটি', 'একটি সঠিক লিংক লিখুন।');
       return;
     }
 
@@ -73,86 +84,93 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     Keyboard.dismiss();
 
     let parsedFormats = [];
-    let title = `${platform.toUpperCase()} Media`;
+    let title = platform.toUpperCase() + ' Video';
 
-    // ১. প্রাইমারি ব্যাকএন্ড API
+    // Primary Backend
     try {
-      let targetUrl = adminSettings?.apiUrl || 'https://mrdownload-apk.onrender.com/download';
-      if (!targetUrl.endsWith('/download')) {
-        targetUrl = targetUrl.replace(/\/$/, '') + '/download';
+      let targetUrl = (adminSettings && adminSettings.apiUrl) ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
+      if (targetUrl.charAt(targetUrl.length - 1) === '/') {
+        targetUrl = targetUrl.slice(0, -1);
       }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      if (targetUrl.indexOf('/download') === -1) {
+        targetUrl = targetUrl + '/download';
+      }
 
       const response = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36'
+          'User-Agent': 'Mozilla/5.0'
         },
         body: JSON.stringify({ videoUrl: cleanUrl }),
-        signal: controller.signal,
       });
-
-      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
         title = data.title || data.filename || title;
-
         const itemsList = data.picker || data.formats || data.medias || data.qualities;
+
         if (Array.isArray(itemsList) && itemsList.length > 0) {
-          parsedFormats = itemsList
-            .map((item, index) => ({
-              quality: item.quality || item.resolution || item.type || item.label || `Option ${index + 1}`,
-              url: item.url || item.download_url || item.link,
-              isAudio: (item.quality || '').toLowerCase().includes('audio') || (item.quality || '').toLowerCase().includes('mp3'),
-            }))
-            .filter((f) => f.url);
+          itemsList.forEach((item, index) => {
+            const itemUrl = item.url || item.download_url || item.link;
+            if (itemUrl) {
+              const qLabel = item.quality || item.resolution || item.type || item.label || ('Option ' + (index + 1));
+              const qLower = qLabel.toLowerCase();
+              parsedFormats.push({
+                quality: qLabel,
+                url: itemUrl,
+                isAudio: qLower.indexOf('audio') !== -1 || qLower.indexOf('mp3') !== -1,
+              });
+            }
+          });
         } else if (data.download_url || data.downloadUrl || data.url) {
           const mainUrl = data.download_url || data.downloadUrl || data.url;
-          parsedFormats.push({ quality: '1080p Full HD', url: mainUrl });
-          parsedFormats.push({ quality: '720p HD', url: mainUrl });
-          parsedFormats.push({ quality: '480p SD Quality', url: mainUrl });
+          parsedFormats.push({ quality: '1080p Full HD', url: mainUrl, isAudio: false });
+          parsedFormats.push({ quality: '720p HD', url: mainUrl, isAudio: false });
+          parsedFormats.push({ quality: '480p SD Quality', url: mainUrl, isAudio: false });
           parsedFormats.push({ quality: 'Audio Only (MP3)', url: mainUrl, isAudio: true });
         }
       }
     } catch (err) {
-      console.log('Primary Backend Error / Timeout');
+      console.log('Primary Backend Failed');
     }
 
-    // ২. ব্যাকআপ পাবলিক API
+    // Public Backup API
     if (parsedFormats.length === 0) {
       try {
-        const aioRes = await fetch(`https://api.vkrdown.com/api/item?url=${encodeURIComponent(cleanUrl)}`);
+        const aioRes = await fetch('https://api.vkrdown.com/api/item?url=' + encodeURIComponent(cleanUrl));
         if (aioRes.ok) {
           const aioData = await aioRes.json();
           if (aioData && aioData.data) {
             title = aioData.data.title || title;
-            if (Array.isArray(aioData.data.downloads) && aioData.data.downloads.length > 0) {
-              parsedFormats = aioData.data.downloads.map((item) => ({
-                quality: item.quality || item.format || 'HD Quality',
-                url: item.url,
-                isAudio: item.format === 'mp3' || (item.quality && item.quality.includes('audio')),
-              })).filter((f) => f.url);
+            if (Array.isArray(aioData.data.downloads)) {
+              aioData.data.downloads.forEach((item) => {
+                if (item.url) {
+                  const qLabel = item.quality || item.format || 'HD Quality';
+                  parsedFormats.push({
+                    quality: qLabel,
+                    url: item.url,
+                    isAudio: item.format === 'mp3' || qLabel.toLowerCase().indexOf('audio') !== -1,
+                  });
+                }
+              });
             }
           }
         }
       } catch (e) {
-        console.log('Backup API 1 Failed');
+        console.log('VKR API Failed');
       }
     }
 
-    // ৩. ইউটিউব ফলব্যাক
+    // YouTube Fallback
     if (parsedFormats.length === 0 && platform === 'youtube') {
       const ytId = extractYoutubeId(cleanUrl);
       if (ytId) {
-        title = `YouTube Video (${ytId})`;
+        title = 'YouTube Video (' + ytId + ')';
         parsedFormats = [
-          { quality: '720p HD Quality', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=22` },
-          { quality: '360p SD Quality', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=18` },
-          { quality: 'Audio Only (MP3)', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=140`, isAudio: true }
+          { quality: '720p HD Quality', url: 'https://yt.artemislena.eu/latest_version?id=' + ytId + '&itag=22', isAudio: false },
+          { quality: '360p SD Quality', url: 'https://yt.artemislena.eu/latest_version?id=' + ytId + '&itag=18', isAudio: false },
+          { quality: 'Audio Only (MP3)', url: 'https://yt.artemislena.eu/latest_version?id=' + ytId + '&itag=140', isAudio: true }
         ];
       }
     }
@@ -160,21 +178,18 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     setLoading(false);
 
     if (parsedFormats.length > 0) {
-      const uniqueFormats = Array.from(new Set(parsedFormats.map((a) => a.quality)))
-        .map((quality) => parsedFormats.find((a) => a.quality === quality));
-
-      setDownloadFormats(uniqueFormats);
+      setDownloadFormats(parsedFormats);
       setVideoTitle(title);
     } else {
-      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। অন্য একটি লিংক চেষ্টা করুন।');
+      Alert.alert('ব্যর্থ', 'লিংকটি প্রসেস করা সম্ভব হয়নি। অন্য একটি ভিডিও ট্রাই করুন।');
     }
   };
 
-  const startInAppDownload = async (fileUrl, quality, isAudio = false) => {
+  const startInAppDownload = async (fileUrl, quality, isAudio) => {
     try {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (permission.status !== 'granted') {
-        Alert.alert('অনুমতি প্রয়োজন', 'ফাইল মেমোরিতে সেভ করার অনুমতি দিন।');
+        Alert.alert('অনুমতি প্রয়োজন', 'ফাইল সেভ করার পারমিশন প্রয়োজন।');
         return;
       }
 
@@ -183,7 +198,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       const ext = isAudio ? 'mp3' : 'mp4';
       const cleanTitle = (videoTitle || 'Video').replace(/[^a-zA-Z0-9]/g, '_');
-      const filename = `${cleanTitle}_${Date.now()}.${ext}`;
+      const filename = cleanTitle + '_' + Date.now() + '.' + ext;
       const tempLocalUri = FileSystem.cacheDirectory + filename;
 
       const callback = (downloadProgressData) => {
@@ -203,7 +218,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       const downloadResult = await downloadResumable.downloadAsync();
 
       if (!downloadResult || !downloadResult.uri) {
-        throw new Error('ডাউনলোড সম্পূর্ণ হয়নি');
+        throw new Error('Download incomplete');
       }
 
       const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
@@ -216,22 +231,20 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       await FileSystem.deleteAsync(tempLocalUri, { idempotent: true });
 
-      Alert.alert('ডাউনলোড সফল!', 'ফাইলটি আপনার Internal Storage/MrDownload ফোল্ডারে সেভ হয়েছে।');
+      Alert.alert('ডাউনলোড সফল!', 'ফাইলটি আপনার Internal Storage/MrDownload ফোল্ডারে সেভ হয়েছে।');
 
-      const platform = detectPlatform(url);
-      if (onDownloadSuccess) {
-        onDownloadSuccess({
+      if (props && props.onDownloadSuccess) {
+        props.onDownloadSuccess({
           id: Date.now(),
-          platform: platform,
-          title: videoTitle || `${platform.toUpperCase()} Media`,
+          platform: detectPlatform(url),
+          title: videoTitle || 'Media',
           quality: quality || 'HD',
           size: 'Auto',
           time: 'এখনই',
         });
       }
     } catch (err) {
-      console.log('Download Error:', err);
-      Alert.alert('ডাউনলোড ব্যর্থ', 'ভিডিওটি সেভ করতে সমস্যা হয়েছে। অন্য কোয়ালিটি চেষ্টা করুন।');
+      Alert.alert('ডাউনলোড ব্যর্থ', 'ভিডিওটি সেভ করা যায়নি।');
     } finally {
       setDownloadingUrl(null);
       setDownloadProgress(0);
@@ -246,7 +259,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       </View>
 
       <View style={styles.inputContainer}>
-        <Ionicons name="link" size={20} color={COLORS.muted} style={{ marginRight: 10 }} />
+        <Ionicons name="link" size={20} color={COLORS.muted} style={styles.linkIcon} />
         <TextInput
           style={styles.input}
           placeholder="ভিডিও লিংক পেস্ট করুন..."
@@ -254,31 +267,33 @@ export default function DownloadScreen({ onDownloadSuccess }) {
           value={url}
           onChangeText={(text) => {
             setUrl(text);
-            if (downloadFormats.length > 0) setDownloadFormats([]);
+            if (downloadFormats.length > 0) {
+              setDownloadFormats([]);
+            }
           }}
           autoCapitalize="none"
           autoCorrect={false}
         />
-        {url.length > 0 && (
+        {url.length > 0 ? (
           <TouchableOpacity onPress={() => { setUrl(''); setDownloadFormats([]); }}>
             <Ionicons name="close-circle" size={20} color={COLORS.muted} />
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
 
       <TouchableOpacity
-        style={[styles.downloadBtn, loading && { opacity: 0.7 }]}
+        style={[styles.downloadBtn, loading ? styles.disabledBtn : null]}
         onPress={handleFetchMedia}
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color="#ffffff" />
         ) : (
           <Text style={styles.downloadBtnText}>ভিডিও ফরম্যাট ফেচ করুন</Text>
         )}
       </TouchableOpacity>
 
-      {downloadFormats.length > 0 && (
+      {downloadFormats.length > 0 ? (
         <View style={styles.formatContainer}>
           <Text style={styles.formatTitle}>কোয়ালিটি / ফরম্যাট সিলেক্ট করুন:</Text>
           {downloadFormats.map((item, index) => {
@@ -288,30 +303,30 @@ export default function DownloadScreen({ onDownloadSuccess }) {
                 <TouchableOpacity
                   style={styles.formatCard}
                   onPress={() => startInAppDownload(item.url, item.quality, item.isAudio)}
-                  disabled={!!downloadingUrl}
+                  disabled={Boolean(downloadingUrl)}
                 >
                   <View style={styles.formatInfo}>
-                    <Ionicons 
-                      name={item.isAudio ? "musical-notes-outline" : "film-outline"} 
-                      size={22} 
-                      color={item.isAudio ? COLORS.purple : COLORS.green} 
+                    <Ionicons
+                      name={item.isAudio ? 'musical-notes-outline' : 'film-outline'}
+                      size={22}
+                      color={item.isAudio ? COLORS.purple : COLORS.green}
                     />
                     <Text style={styles.formatText}>{item.quality}</Text>
                   </View>
                   <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} />
                 </TouchableOpacity>
 
-                {isThisDownloading && (
+                {isThisDownloading ? (
                   <View style={styles.progressContainer}>
-                    <View style={[styles.progressBar, { width: `${downloadProgress}%` }]} />
+                    <View style={[styles.progressBar, { width: downloadProgress + '%' }]} />
                     <Text style={styles.progressText}>ডাউনলোড হচ্ছে: {downloadProgress}%</Text>
                   </View>
-                )}
+                ) : null}
               </View>
             );
           })}
         </View>
-      )}
+      ) : null}
     </ScrollView>
   );
 }
@@ -350,6 +365,9 @@ const styles = StyleSheet.create({
     height: 56,
     marginBottom: 16,
   },
+  linkIcon: {
+    marginRight: 10,
+  },
   input: {
     flex: 1,
     color: COLORS.text,
@@ -360,8 +378,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
-    justify.content: 'center',
+    justifyContent: 'center',
     elevation: 4,
+  },
+  disabledBtn: {
+    opacity: 0.7,
   },
   downloadBtnText: {
     color: '#ffffff',
@@ -388,7 +409,7 @@ const styles = StyleSheet.create({
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justify.content: 'space-between',
+    justifyContent: 'space-between',
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
@@ -411,7 +432,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     height: 18,
     overflow: 'hidden',
-    justify.content: 'center',
+    justifyContent: 'center',
   },
   progressBar: {
     position: 'absolute',
@@ -421,7 +442,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.purple,
   },
   progressText: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 10,
     fontWeight: 'bold',
     textAlign: 'center',
