@@ -7,11 +7,12 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Linking,
   Keyboard,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 import { useSettings } from './context/SettingsContext';
 
 const COLORS = {
@@ -30,6 +31,10 @@ export default function DownloadScreen({ onDownloadSuccess }) {
   const [loading, setLoading] = useState(false);
   const [downloadFormats, setDownloadFormats] = useState([]);
   const [videoTitle, setVideoTitle] = useState('');
+
+  // ব্যাকগ্রাউন্ড ডাউনলোড ও প্রোগ্রেস স্টেট
+  const [downloadingUrl, setDownloadingUrl] = useState(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const detectPlatform = (link) => {
     const l = link.toLowerCase();
@@ -59,7 +64,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     Keyboard.dismiss();
 
     try {
-      // Dynamic Server URL সেটআপ
       let targetUrl = adminSettings?.apiUrl || 'https://mrdownload-apk.onrender.com/download';
       if (!targetUrl.endsWith('/download')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/download';
@@ -75,8 +79,8 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       let data = await response.json();
 
-      // Render এ না পেলে Cobalt API তে ফলব্যাক
-      if (!response.ok || (!data.download_url && !data.downloadUrl && !data.url && !data.picker)) {
+      // Cobalt API Fallback
+      if (!response.ok || (!data.download_url && !data.downloadUrl && !data.url && !data.picker && !data.formats && !data.medias)) {
         const cobaltRes = await fetch('https://co.wuk.sh/api/json', {
           method: 'POST',
           headers: {
@@ -91,18 +95,31 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         data = await cobaltRes.json();
       }
 
-      const finalUrl = data.download_url || data.downloadUrl || data.url;
+      let parsedFormats = [];
+      const itemsList = data.picker || data.formats || data.medias || data.qualities;
 
-      if (finalUrl) {
-        setDownloadFormats([{ quality: 'HD / Best Quality', url: finalUrl }]);
-        setVideoTitle(data.filename || `${platform.toUpperCase()} Video`);
-      } else if (data.picker && Array.isArray(data.picker)) {
-        const formats = data.picker.map((item, index) => ({
-          quality: item.quality || item.type || `Option ${index + 1}`,
-          url: item.url,
-        }));
-        setDownloadFormats(formats);
-        setVideoTitle(`${platform.toUpperCase()} Video`);
+      if (Array.isArray(itemsList) && itemsList.length > 0) {
+        parsedFormats = itemsList
+          .map((item, index) => ({
+            quality: item.quality || item.resolution || item.type || item.label || `Option ${index + 1}`,
+            url: item.url || item.download_url || item.link,
+          }))
+          .filter((f) => f.url);
+      }
+
+      if (parsedFormats.length === 0) {
+        if (data.hd || data.hd_url) parsedFormats.push({ quality: 'HD Quality (1080p)', url: data.hd || data.hd_url });
+        if (data.sd || data.sd_url) parsedFormats.push({ quality: 'SD Quality (720p/360p)', url: data.sd || data.sd_url });
+      }
+
+      const singleUrl = data.download_url || data.downloadUrl || data.url;
+      if (parsedFormats.length === 0 && singleUrl) {
+        parsedFormats.push({ quality: 'HD / Best Quality', url: singleUrl });
+      }
+
+      if (parsedFormats.length > 0) {
+        setDownloadFormats(parsedFormats);
+        setVideoTitle(data.title || data.filename || `${platform.toUpperCase()} Video`);
       } else {
         Alert.alert('ত্রুটি', data.message || 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি আবার পরীক্ষা করুন।');
       }
@@ -113,11 +130,46 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     }
   };
 
-  const startDirectDownload = async (fileUrl, quality) => {
+  // expo-file-system দিয়ে সরাসরি মেমোরিতে ভিডিও ডাউনলোড ফাংশন
+  const startInAppDownload = async (fileUrl, quality) => {
     try {
-      const platform = detectPlatform(url);
-      await Linking.openURL(fileUrl);
+      // ১. মেমোরি পারমিশন চাওয়া
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('পারমিশন প্রয়োজন', 'গ্যালারিতে ভিডিও সেভ করার জন্য পারমিশন দিন।');
+        return;
+      }
 
+      setDownloadingUrl(fileUrl);
+      setDownloadProgress(0);
+
+      const filename = `MR_Download_${Date.now()}.mp4`;
+      const fileUri = FileSystem.documentDirectory + filename;
+
+      // ২. ডাউনলোডের প্রোগ্রেস ট্র্যাক করা
+      const callback = (downloadProgressData) => {
+        const progress =
+          downloadProgressData.totalBytesWritten /
+          downloadProgressData.totalBytesExpectedToWrite;
+        setDownloadProgress(Math.round(progress * 100));
+      };
+
+      const downloadResumable = FileSystem.createDownloadResumable(
+        fileUrl,
+        fileUri,
+        {},
+        callback
+      );
+
+      // ৩. ব্যাকগ্রাউন্ড ডাউনলোড শুরু
+      const { uri } = await downloadResumable.downloadAsync();
+
+      // ৪. গ্যালারি/মিডিয়া লাইব্রেরিতে সেভ করা
+      await MediaLibrary.saveToLibraryAsync(uri);
+
+      Alert.alert('সফল!', 'ভিডিওটি সফলভাবে আপনার ফোনের গ্যালারিতে সেভ হয়েছে।');
+
+      const platform = detectPlatform(url);
       if (onDownloadSuccess) {
         onDownloadSuccess({
           id: Date.now(),
@@ -129,7 +181,10 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         });
       }
     } catch (err) {
-      Alert.alert('ত্রুটি', 'ডাউনলোড শুরু করা সম্ভব হয়নি।');
+      Alert.alert('ডাউনলোড ব্যর্থ', 'ভিডিওটি ডাউনলোড করতে সমস্যা হয়েছে।');
+    } finally {
+      setDownloadingUrl(null);
+      setDownloadProgress(0);
     }
   };
 
@@ -176,19 +231,32 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       {downloadFormats.length > 0 && (
         <View style={styles.formatContainer}>
           <Text style={styles.formatTitle}>ডাউনলোড ফরম্যাট সিলেক্ট করুন:</Text>
-          {downloadFormats.map((item, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.formatCard}
-              onPress={() => startDirectDownload(item.url, item.quality)}
-            >
-              <View style={styles.formatInfo}>
-                <Ionicons name="download-outline" size={22} color={COLORS.green} />
-                <Text style={styles.formatText}>{item.quality}</Text>
+          {downloadFormats.map((item, index) => {
+            const isThisDownloading = downloadingUrl === item.url;
+            return (
+              <View key={index} style={styles.formatCardWrapper}>
+                <TouchableOpacity
+                  style={styles.formatCard}
+                  onPress={() => startInAppDownload(item.url, item.quality)}
+                  disabled={!!downloadingUrl}
+                >
+                  <View style={styles.formatInfo}>
+                    <Ionicons name="download-outline" size={22} color={COLORS.green} />
+                    <Text style={styles.formatText}>{item.quality}</Text>
+                  </View>
+                  <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} />
+                </TouchableOpacity>
+
+                {/* প্রোগ্রেস বার (Progress Bar) */}
+                {isThisDownloading && (
+                  <View style={styles.progressContainer}>
+                    <View style={[styles.progressBar, { width: `${downloadProgress}%` }]} />
+                    <Text style={styles.progressText}>ডাউনলোড হচ্ছে: {downloadProgress}%</Text>
+                  </View>
+                )}
               </View>
-              <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} />
-            </TouchableOpacity>
-          ))}
+            );
+          })}
         </View>
       )}
     </ScrollView>
@@ -261,6 +329,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 12,
   },
+  formatCardWrapper: {
+    marginBottom: 10,
+  },
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -268,7 +339,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
-    marginBottom: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -281,5 +351,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 10,
+  },
+  progressContainer: {
+    marginTop: 6,
+    backgroundColor: '#1f1b3a',
+    borderRadius: 8,
+    height: 18,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  progressBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: COLORS.purple,
+  },
+  progressText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    zIndex: 1,
   },
 });
