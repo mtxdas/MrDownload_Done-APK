@@ -28,25 +28,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK Environment
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
-
       - name: Install Dependencies
         run: npm ci || npm install
 
-      - name: Prebuild Android Project
+      - name: Run Expo Prebuild
         run: npx expo prebuild --platform android --clean
 
-      - name: Make gradle executable
+      - name: Set Gradle Permissions
         run: chmod +x android/gradlew
 
-      - name: Build Android APK
+      - name: Build Android Release APK
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
