@@ -80,7 +80,7 @@ export default function DownloadScreen(props) {
     let parsedFormats = [];
     let title = platform.toUpperCase() + ' Video';
 
-    // ১. আপনার প্রাইমারি Render/Custom সার্ভার
+    // ১. প্রাইমারি Render/Custom সার্ভার
     try {
       let targetUrl = (adminSettings && adminSettings.apiUrl) ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
       if (targetUrl.charAt(targetUrl.length - 1) === '/') {
@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justify.content: 'space-between',
+    justifyContent: 'space-between',
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
