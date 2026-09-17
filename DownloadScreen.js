@@ -75,7 +75,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     let parsedFormats = [];
     let title = `${platform.toUpperCase()} Media`;
 
-    // ১. প্রাইমারি ব্যাকএন্ড API (Render)
+    // ১. প্রাইমারি ব্যাকএন্ড API
     try {
       let targetUrl = adminSettings?.apiUrl || 'https://mrdownload-apk.onrender.com/download';
       if (!targetUrl.endsWith('/download')) {
@@ -119,10 +119,10 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         }
       }
     } catch (err) {
-      console.log('Primary Backend Failed or Timeout');
+      console.log('Primary Backend Error / Timeout');
     }
 
-    // ২. শক্তিশালী ব্যাকআপ পাবলিক ডাউনলোডার API (AIO Downloader)
+    // ২. ব্যাকআপ পাবলিক API
     if (parsedFormats.length === 0) {
       try {
         const aioRes = await fetch(`https://api.vkrdown.com/api/item?url=${encodeURIComponent(cleanUrl)}`);
@@ -134,59 +134,17 @@ export default function DownloadScreen({ onDownloadSuccess }) {
               parsedFormats = aioData.data.downloads.map((item) => ({
                 quality: item.quality || item.format || 'HD Quality',
                 url: item.url,
-                isAudio: item.format === 'mp3' || item.quality?.includes('audio'),
-              })).filter(f => f.url);
+                isAudio: item.format === 'mp3' || (item.quality && item.quality.includes('audio')),
+              })).filter((f) => f.url);
             }
           }
         }
       } catch (e) {
-        console.log('VKR API Failed');
+        console.log('Backup API 1 Failed');
       }
     }
 
-    // ৩. ব্যাকআপ Cobalt API
-    if (parsedFormats.length === 0) {
-      const cobaltEndpoints = [
-        'https://co.wuk.sh/api/json',
-        'https://api.cobalt.tools/api/json'
-      ];
-
-      for (const endpoint of cobaltEndpoints) {
-        try {
-          const cobaltRes = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ url: cleanUrl, vQuality: 'max' }),
-          });
-
-          if (cobaltRes.ok) {
-            const cobaltData = await cobaltRes.json();
-            if (cobaltData.picker && Array.isArray(cobaltData.picker)) {
-              parsedFormats = cobaltData.picker.map((item, idx) => ({
-                quality: item.quality || `Quality ${idx + 1}`,
-                url: item.url,
-              }));
-              break;
-            } else if (cobaltData.url) {
-              parsedFormats = [
-                { quality: '1080p Full HD', url: cobaltData.url },
-                { quality: '720p HD', url: cobaltData.url },
-                { quality: '480p SD Quality', url: cobaltData.url },
-                { quality: 'Audio Only (MP3)', url: cobaltData.url, isAudio: true },
-              ];
-              break;
-            }
-          }
-        } catch (e) {
-          console.log(`Failed Cobalt: ${endpoint}`);
-        }
-      }
-    }
-
-    // ৪. ইউটিউব ইনভিডিয়াস ও পাইপড ব্যাকআপ স্ট্রিম (YouTube Fallback)
+    // ৩. ইউটিউব ফলব্যাক
     if (parsedFormats.length === 0 && platform === 'youtube') {
       const ytId = extractYoutubeId(cleanUrl);
       if (ytId) {
@@ -202,13 +160,13 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     setLoading(false);
 
     if (parsedFormats.length > 0) {
-      const uniqueFormats = Array.from(new Set(parsedFormats.map(a => a.quality)))
-        .map(quality => parsedFormats.find(a => a.quality === quality));
+      const uniqueFormats = Array.from(new Set(parsedFormats.map((a) => a.quality)))
+        .map((quality) => parsedFormats.find((a) => a.quality === quality));
 
       setDownloadFormats(uniqueFormats);
       setVideoTitle(title);
     } else {
-      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। ইন্টারনেট কানেকশন বা অন্য একটি ভিডিও লিংক দিয়ে চেষ্টা করুন।');
+      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। অন্য একটি লিংক চেষ্টা করুন।');
     }
   };
 
@@ -216,7 +174,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     try {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (permission.status !== 'granted') {
-        Alert.alert('অনুমতি প্রয়োজন', 'ফাইল ইন্টারনাল মেমোরিতে সেভ করার জন্য পারমিশন দিন।');
+        Alert.alert('অনুমতি প্রয়োজন', 'ফাইল মেমোরিতে সেভ করার অনুমতি দিন।');
         return;
       }
 
@@ -245,10 +203,9 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       const downloadResult = await downloadResumable.downloadAsync();
 
       if (!downloadResult || !downloadResult.uri) {
-        throw new Error('ডাউনলোড অসম্পূর্ণ রয়ে গেছে');
+        throw new Error('ডাউনলোড সম্পূর্ণ হয়নি');
       }
 
-      // 'MrDownload' ফোল্ডারে সেভ নিশ্চিত করা
       const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
       let album = await MediaLibrary.getAlbumAsync('MrDownload');
       if (album === null) {
@@ -259,10 +216,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       await FileSystem.deleteAsync(tempLocalUri, { idempotent: true });
 
-      Alert.alert(
-        'ডাউনলোড সফল!',
-        `ফাইলটি আপনার Internal Storage/MrDownload ফোল্ডারে সেভ হয়েছে।`
-      );
+      Alert.alert('ডাউনলোড সফল!', 'ফাইলটি আপনার Internal Storage/MrDownload ফোল্ডারে সেভ হয়েছে।');
 
       const platform = detectPlatform(url);
       if (onDownloadSuccess) {
@@ -277,7 +231,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       }
     } catch (err) {
       console.log('Download Error:', err);
-      Alert.alert('ডাউনলোড ব্যর্থ', 'ভিডিওটি সেভ করতে সমস্যা হয়েছে। অন্য কোনো কোয়ালিটি চেষ্টা করুন।');
+      Alert.alert('ডাউনলোড ব্যর্থ', 'ভিডিওটি সেভ করতে সমস্যা হয়েছে। অন্য কোয়ালিটি চেষ্টা করুন।');
     } finally {
       setDownloadingUrl(null);
       setDownloadProgress(0);
@@ -457,7 +411,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     height: 18,
     overflow: 'hidden',
-    justifyContent: 'center',
+    justify.content: 'center',
   },
   progressBar: {
     position: 'absolute',
