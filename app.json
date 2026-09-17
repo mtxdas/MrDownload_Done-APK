@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0a0818"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.mrdownload.app"
@@ -24,11 +26,11 @@
       "package": "com.mrdownload.app",
       "versionCode": 1,
       "permissions": [
-        "android.permission.INTERNET",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO"
+        "INTERNET",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_VIDEO",
+        "READ_MEDIA_AUDIO"
       ],
       "intentFilters": [
         {
@@ -46,17 +48,31 @@
             { "scheme": "https", "host": "xhamster.com" },
             { "scheme": "https", "host": "xnxx.com" }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
     "plugins": [
-      ["expo-media-library", { "photosPermission": "MRDownload needs access to save videos." }]
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "MrDownload needs access to your media gallery to download and save videos.",
+          "savePhotosPermission": "MrDownload needs permission to save videos directly into your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
     ],
     "scheme": "mrdownload",
     "extra": {
-      "router": { "origin": false },
-      "eas": { "projectId": "f047fc43-cedb-4789-997a-b3d63c0812e7" }
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "f047fc41-cedb-4789-997a-b3d63c0612e7"
+      }
     }
   }
 }
