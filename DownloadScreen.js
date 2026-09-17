@@ -12,9 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
-// Render Backend Server Base URL
-const API_BASE_URL = 'https://mrdownload-apk.onrender.com';
+import { useSettings } from './context/SettingsContext';
 
 const COLORS = {
   bg: '#0a0818',
@@ -27,6 +25,7 @@ const COLORS = {
 };
 
 export default function DownloadScreen({ onDownloadSuccess }) {
+  const { adminSettings } = useSettings();
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [downloadFormats, setDownloadFormats] = useState([]);
@@ -45,7 +44,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     return 'video';
   };
 
-  // ১. Backend থেকে ফাইল বা ফরম্যাটের অপশন ফেচ করার ফাংশন
   const handleFetchMedia = async () => {
     if (!url || !url.trim()) {
       Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি সঠিক ভিডিও লিঙ্ক লিখুন।');
@@ -61,8 +59,13 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     Keyboard.dismiss();
 
     try {
-      // নিজস্ব Render Backend-এ সঠিকভাবে videoUrl পাঠানো
-      let response = await fetch(`${API_BASE_URL}/download`, {
+      // Dynamic Server URL সেটআপ
+      let targetUrl = adminSettings?.apiUrl || 'https://mrdownload-apk.onrender.com/download';
+      if (!targetUrl.endsWith('/download')) {
+        targetUrl = targetUrl.replace(/\/$/, '') + '/download';
+      }
+
+      let response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -72,7 +75,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       let data = await response.json();
 
-      // Render সার্ভারে সমস্যা হলে বা ডাউনলোড লিঙ্ক না পেলে Cobalt API-তে ট্রাই
+      // Render এ না পেলে Cobalt API তে ফলব্যাক
       if (!response.ok || (!data.download_url && !data.downloadUrl && !data.url && !data.picker)) {
         const cobaltRes = await fetch('https://co.wuk.sh/api/json', {
           method: 'POST',
@@ -88,15 +91,12 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         data = await cobaltRes.json();
       }
 
-      // একক ডাউনলোড লিঙ্ক পাওয়ার ফিল্ড চেক
       const finalUrl = data.download_url || data.downloadUrl || data.url;
 
       if (finalUrl) {
         setDownloadFormats([{ quality: 'HD / Best Quality', url: finalUrl }]);
         setVideoTitle(data.filename || `${platform.toUpperCase()} Video`);
-      } 
-      // একাধিক কোয়ালিটি/ফরম্যাট থাকলে (Picker Mode)
-      else if (data.picker && Array.isArray(data.picker)) {
+      } else if (data.picker && Array.isArray(data.picker)) {
         const formats = data.picker.map((item, index) => ({
           quality: item.quality || item.type || `Option ${index + 1}`,
           url: item.url,
@@ -107,13 +107,12 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         Alert.alert('ত্রুটি', data.message || 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি আবার পরীক্ষা করুন।');
       }
     } catch (error) {
-      Alert.alert('ব্যর্থ', 'নেটওয়ার্ক সমস্যা অথবা সার্ভার সাড়া দিচ্ছে না।');
+      Alert.alert('ব্যর্থ', error.message || 'নেটওয়ার্ক সমস্যা অথবা সার্ভার সাড়া দিচ্ছে না।');
     } finally {
       setLoading(false);
     }
   };
 
-  // ২. নির্দিষ্ট ফরম্যাটের ওপর ক্লিক করলে সরাসরি ডাউনলোডার সক্রিয় করার ফাংশন
   const startDirectDownload = async (fileUrl, quality) => {
     try {
       const platform = detectPlatform(url);
@@ -174,7 +173,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         )}
       </TouchableOpacity>
 
-      {/* ফরম্যাট ও ডাউনলোডের অপশনসমূহ */}
       {downloadFormats.length > 0 && (
         <View style={styles.formatContainer}>
           <Text style={styles.formatTitle}>ডাউনলোড ফরম্যাট সিলেক্ট করুন:</Text>
