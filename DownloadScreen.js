@@ -52,26 +52,20 @@ export default function DownloadScreen(props) {
     let videoId = '';
     if (link.indexOf('v=') !== -1) {
       const parts = link.split('v=');
-      if (parts[1]) {
-        videoId = parts[1].split('&')[0];
-      }
+      if (parts[1]) videoId = parts[1].split('&')[0];
     } else if (link.indexOf('youtu.be/') !== -1) {
       const parts = link.split('youtu.be/');
-      if (parts[1]) {
-        videoId = parts[1].split('?')[0];
-      }
+      if (parts[1]) videoId = parts[1].split('?')[0];
     } else if (link.indexOf('shorts/') !== -1) {
       const parts = link.split('shorts/');
-      if (parts[1]) {
-        videoId = parts[1].split('?')[0];
-      }
+      if (parts[1]) videoId = parts[1].split('?')[0];
     }
     return videoId;
   };
 
   const handleFetchMedia = async () => {
     if (!url || !url.trim()) {
-      Alert.alert('ত্রুটি', 'একটি সঠিক লিংক লিখুন।');
+      Alert.alert('ত্রুটি', 'একটি সঠিক ভিডিও লিংক প্রবেশ করান।');
       return;
     }
 
@@ -86,7 +80,7 @@ export default function DownloadScreen(props) {
     let parsedFormats = [];
     let title = platform.toUpperCase() + ' Video';
 
-    // Primary Backend
+    // ১. আপনার প্রাইমারি Render/Custom সার্ভার (Timeout বাড়ানো হয়েছে)
     try {
       let targetUrl = (adminSettings && adminSettings.apiUrl) ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
       if (targetUrl.charAt(targetUrl.length - 1) === '/') {
@@ -96,6 +90,9 @@ export default function DownloadScreen(props) {
         targetUrl = targetUrl + '/download';
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
@@ -103,7 +100,10 @@ export default function DownloadScreen(props) {
           'User-Agent': 'Mozilla/5.0'
         },
         body: JSON.stringify({ videoUrl: cleanUrl }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -132,10 +132,55 @@ export default function DownloadScreen(props) {
         }
       }
     } catch (err) {
-      console.log('Primary Backend Failed');
+      console.log('Primary Backend inactive or timed out');
     }
 
-    // Public Backup API
+    // ২. শক্তিশালী ব্যাকআপ: Cobalt API Instances (Universal Fast Downloader)
+    if (parsedFormats.length === 0) {
+      const cobaltInstances = [
+        'https://cobalt-api.kwiatek.xyz',
+        'https://api.cobalt.tools',
+        'https://cobalt.meow.com'
+      ];
+
+      for (let i = 0; i < cobaltInstances.length; i++) {
+        try {
+          const cobRes = await fetch(cobaltInstances[i], {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url: cleanUrl }),
+          });
+
+          if (cobRes.ok) {
+            const cobData = await cobRes.json();
+            if (cobData.status === 'stream' || cobData.status === 'redirect') {
+              const resUrl = cobData.url;
+              parsedFormats.push({ quality: 'Best Quality (HD/MP4)', url: resUrl, isAudio: false });
+              parsedFormats.push({ quality: 'Fast Download (SD)', url: resUrl, isAudio: false });
+              break;
+            } else if (cobData.status === 'picker' && Array.isArray(cobData.picker)) {
+              cobData.picker.forEach((p, pIndex) => {
+                if (p.url) {
+                  parsedFormats.push({
+                    quality: p.type === 'photo' ? ('Photo ' + (pIndex + 1)) : ('Quality ' + (pIndex + 1)),
+                    url: p.url,
+                    isAudio: false,
+                  });
+                }
+              });
+              break;
+            }
+          }
+        } catch (e) {
+          console.log('Cobalt instance error:', cobaltInstances[i]);
+        }
+      }
+    }
+
+    // ৩. ব্যাকআপ Public API (VKR API)
     if (parsedFormats.length === 0) {
       try {
         const aioRes = await fetch('https://api.vkrdown.com/api/item?url=' + encodeURIComponent(cleanUrl));
@@ -162,7 +207,7 @@ export default function DownloadScreen(props) {
       }
     }
 
-    // YouTube Fallback
+    // ৪. ইউটিউব স্পেশাল ব্যাকআপ
     if (parsedFormats.length === 0 && platform === 'youtube') {
       const ytId = extractYoutubeId(cleanUrl);
       if (ytId) {
@@ -181,7 +226,10 @@ export default function DownloadScreen(props) {
       setDownloadFormats(parsedFormats);
       setVideoTitle(title);
     } else {
-      Alert.alert('ব্যর্থ', 'লিংকটি প্রসেস করা সম্ভব হয়নি। অন্য একটি ভিডিও ট্রাই করুন।');
+      Alert.alert(
+        'ব্যর্থ',
+        'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন অথবা ভিন্ন সোশ্যাল মিডিয়া লিংক ব্যবহার করুন।'
+      );
     }
   };
 
@@ -378,7 +426,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
-    justifyContent: 'center',
+    justify.content: 'center',
     elevation: 4,
   },
   disabledBtn: {
@@ -409,7 +457,7 @@ const styles = StyleSheet.create({
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justify.content: 'space-between',
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
@@ -432,7 +480,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     height: 18,
     overflow: 'hidden',
-    justifyContent: 'center',
+    justify.content: 'center',
   },
   progressBar: {
     position: 'absolute',
