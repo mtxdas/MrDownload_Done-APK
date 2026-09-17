@@ -1,3 +1,12 @@
+const express = require('express');
+const cors = require('cors');
+const youtubeDl = require('yt-dlp-exec');
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
 // Video Downloader Endpoint
 app.post('/download', async (req, res) => {
   const { videoUrl } = req.body;
@@ -15,7 +24,6 @@ app.post('/download', async (req, res) => {
       addHeader: ['referer:youtube.com', 'user-agent:googlebot']
     });
 
-    // output সাধারণত একটি স্ট্রিং লিংক রিটার্ন করে যদি getUrl: true থাকে
     const downloadUrl = typeof output === 'string' ? output.trim() : String(output).trim();
 
     return res.json({
@@ -32,4 +40,9 @@ app.post('/download', async (req, res) => {
       error: error.message
     });
   }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
