@@ -28,14 +28,9 @@ const COLORS = {
   red: '#ef4444',
 };
 
-// ১. HTTP requests এবং Download-এর জন্য গ্লোবাল হেডার
-const CUSTOM_HEADERS = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': '*/*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Referer': 'https://www.google.com/',
-};
+// Render/Heroku-এর মতো ফ্রি-টায়ার সার্ভার কোল্ড-স্টার্টে বেশি সময় নিতে পারে,
+// তাই টাইমআউট বাড়িয়ে ৪৫ সেকেন্ড করা হয়েছে।
+const FETCH_TIMEOUT_MS = 45000;
 
 export default function DownloadScreen(props) {
   const settingsContext = useSettings();
@@ -48,13 +43,18 @@ export default function DownloadScreen(props) {
 
   const [downloadingUrl, setDownloadingUrl] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadComplete, setDownloadComplete] = useState(false);
+  // ডাউনলোড শেষ হয়ে গ্যালারি/স্টোরেজে সেভ করার পর্যায়ে আছে কিনা —
+  // এই পর্যায়ে ক্যান্সেল বাটন লুকানো থাকবে, যাতে সেভ-চলাকালীন
+  // ক্যান্সেল করে race condition তৈরি না হয়।
+  const [isSaving, setIsSaving] = useState(false);
 
   const isMounted = useRef(true);
   const activeDownloadResumable = useRef(null);
   const currentTempUri = useRef(null);
   const isCancelled = useRef(false);
+  const completeTimeoutRef = useRef(null);
 
-  // ২. সেফ ক্যাশ ফাইল ক্লিনআপ
   const cleanupTempFile = useCallback(async (fileUri) => {
     const targetUri = fileUri || currentTempUri.current;
     if (!targetUri) return;
@@ -64,7 +64,7 @@ export default function DownloadScreen(props) {
         await FileSystem.deleteAsync(targetUri, { idempotent: true });
       }
     } catch (e) {
-      // সাইলেন্ট এরর হ্যান্ডলিং
+      // Ignore error during cleanup
     } finally {
       if (targetUri === currentTempUri.current) {
         currentTempUri.current = null;
@@ -72,21 +72,23 @@ export default function DownloadScreen(props) {
     }
   }, []);
 
-  // ৩. কম্পোনেন্ট আনমাউন্ট ও মেমোরি লিক প্রটেকশন
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
       if (activeDownloadResumable.current) {
-        try {
-          activeDownloadResumable.current.cancelAsync();
-        } catch (e) {}
+        // cancelAsync() একটি Promise রিটার্ন করে — এখানে await করা যাবে না
+        // (cleanup ফাংশন sync), তাই .catch() দিয়ে rejection ধরে
+        // unhandled-promise-rejection warning এড়ানো হলো।
+        activeDownloadResumable.current.cancelAsync().catch(() => {});
+      }
+      if (completeTimeoutRef.current) {
+        clearTimeout(completeTimeoutRef.current);
       }
       cleanupTempFile();
     };
   }, [cleanupTempFile]);
 
-  // ৪. ইনপুট স্যানিটাইজেশন ও প্ল্যাটফর্ম ডিটেকশন
   const sanitizeUrl = useCallback((inputUrl) => {
     if (!inputUrl) return '';
     let clean = String(inputUrl).trim();
@@ -108,14 +110,6 @@ export default function DownloadScreen(props) {
     return 'video';
   }, []);
 
-  const extractYoutubeId = useCallback((link) => {
-    if (!link) return '';
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|shorts\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = link.match(regExp);
-    return match && match[2] && match[2].length === 11 ? match[2] : '';
-  }, []);
-
-  // ৫. সেফ ফাইল এক্সটেনশন ডিটেক্টর
   const getFileExtension = useCallback((fileUrl, isAudio) => {
     try {
       const urlWithoutQuery = fileUrl.split('?')[0].split('#')[0];
@@ -130,28 +124,21 @@ export default function DownloadScreen(props) {
     return isAudio ? 'mp3' : 'mp4';
   }, []);
 
-  // ৬. নেটওয়ার্ক রিকুয়েস্ট হ্যান্ডলার (Custom Headers সহ)
-  const fetchWithTimeout = useCallback(async (resource, options = {}, timeout = 25000) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
+  // ইউনিকোড প্রপার্টি এসকেপ (\p{L}, \p{N}) পুরনো Hermes ইঞ্জিনে
+  // সাপোর্টেড না-ও থাকতে পারে, তাই try/catch দিয়ে সেফ ASCII fallback রাখা হলো।
+  const sanitizeFileName = useCallback((rawName) => {
+    let cleaned = rawName;
     try {
-      const response = await fetch(resource, {
-        ...options,
-        headers: {
-          ...CUSTOM_HEADERS,
-          ...(options.headers || {}),
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(id);
-      return response;
-    } catch (error) {
-      clearTimeout(id);
-      throw error;
+      cleaned = rawName.replace(/[^\p{L}\p{N}_\- ]/gu, '_');
+    } catch (e) {
+      // Unicode property escape সাপোর্ট না থাকলে বেসিক ASCII-only ক্লিনআপ
+      cleaned = rawName.replace(/[^a-zA-Z0-9_\- ]/g, '_');
     }
+    cleaned = cleaned.trim().replace(/\s+/g, '_').substring(0, 25);
+    return cleaned || 'Media_File';
   }, []);
 
-  // ৭. মিডিয়া ফেচিং ও ফলব্যাক হ্যান্ডলিং
+  // ১. টাইমআউট (৪৫ সেকেন্ড) এবং স্পষ্ট এরর মেসেজ সহ ফেচ ফাংশন
   const handleFetchMedia = useCallback(async () => {
     const cleanUrl = sanitizeUrl(url);
     if (!cleanUrl) {
@@ -167,6 +154,7 @@ export default function DownloadScreen(props) {
     Keyboard.dismiss();
 
     let parsedFormats = [];
+    let skippedCount = 0;
     let title = `${platform.toUpperCase()} Video`;
 
     let targetUrl = adminSettings && adminSettings.apiUrl ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
@@ -177,23 +165,36 @@ export default function DownloadScreen(props) {
       targetUrl = `${targetUrl}/download`;
     }
 
-    // ব্যাকএন্ড এপিআই রিকুয়েস্ট
-    try {
-      const response = await fetchWithTimeout(
-        targetUrl,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({ videoUrl: cleanUrl, url: cleanUrl }),
-        },
-        20000
-      );
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-      if (response.ok && isMounted.current) {
-        const data = await response.json();
+    let errorMessage = null;
+
+    try {
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ videoUrl: cleanUrl, url: cleanUrl }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        // সার্ভার 200 OK দিয়েও HTML/প্লেইন-টেক্সট (যেমন প্রক্সি এরর পেজ)
+        // রিটার্ন করতে পারে — response.json() তখন থ্রো করবে, তাই এটা
+        // আলাদাভাবে try/catch করে স্পষ্ট মেসেজ দেওয়া হলো (নেটওয়ার্ক এরর
+        // হিসেবে ভুলভাবে দেখানো এড়াতে)।
+        let data = null;
+        try {
+          data = await response.json();
+        } catch (parseErr) {
+          errorMessage = 'সার্ভার থেকে অপ্রত্যাশিত রেসপন্স পাওয়া গেছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+        }
+
         if (data && !data.error) {
           title = data.title || data.filename || title;
           const itemsList = data.picker || data.formats || data.medias || data.qualities;
@@ -211,90 +212,31 @@ export default function DownloadScreen(props) {
                   url: itemUrl,
                   isAudio: item.isAudio || qLower.includes('audio') || qLower.includes('mp3'),
                 });
+              } else {
+                skippedCount += 1;
               }
             });
-          } else if (data.download_url || data.downloadUrl || data.url) {
-            const mainUrl = sanitizeUrl(data.download_url || data.downloadUrl || data.url);
-            parsedFormats.push(
-              { id: `1080p_${Date.now()}`, quality: '1080p Full HD', url: mainUrl, isAudio: false },
-              { id: `720p_${Date.now()}`, quality: '720p HD', url: mainUrl, isAudio: false },
-              { id: `480p_${Date.now()}`, quality: '480p SD Quality', url: mainUrl, isAudio: false },
-              { id: `mp3_${Date.now()}`, quality: 'Audio Only (MP3)', url: mainUrl, isAudio: true }
-            );
-          }
-        }
-      }
-    } catch (err) {}
-
-    // ফলব্যাক ১: Cobalt API
-    if (parsedFormats.length === 0 && isMounted.current) {
-      const cobaltInstances = ['https://api.cobalt.tools', 'https://cobalt-api.kwiatek.xyz'];
-      for (let i = 0; i < cobaltInstances.length; i++) {
-        if (!isMounted.current) break;
-        try {
-          const cobRes = await fetchWithTimeout(
-            cobaltInstances[i],
-            {
-              method: 'POST',
-              headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-              body: JSON.stringify({ url: cleanUrl }),
-            },
-            7000
-          );
-
-          if (cobRes.ok) {
-            const cobData = await cobRes.json();
-            if (cobData.status === 'stream' || cobData.status === 'redirect' || cobData.url) {
-              parsedFormats.push({
-                id: `cobalt_${i}_${Date.now()}`,
-                quality: 'HD Quality',
-                url: sanitizeUrl(cobData.url),
-                isAudio: false,
-              });
-              break;
+            // সব ফরম্যাটেই url মিসিং থাকলে ইউজারকে জেনেরিক মেসেজের বদলে
+            // আসল কারণ জানানো দরকার।
+            if (parsedFormats.length === 0) {
+              errorMessage = 'পাওয়া ফরম্যাটগুলোর কোনোটিতেই সঠিক ডাউনলোড লিংক পাওয়া যায়নি।';
             }
+          } else {
+            errorMessage = 'সার্ভার কোনো ডাউনলোড ফরম্যাট রিটার্ন করেনি।';
           }
-        } catch (e) {}
-      }
-    }
-
-    // ফলব্যাক ২: VKR API
-    if (parsedFormats.length === 0 && isMounted.current) {
-      try {
-        const aioRes = await fetchWithTimeout(`https://api.vkrdown.com/api/item?url=${encodeURIComponent(cleanUrl)}`, {}, 7000);
-        if (aioRes.ok && isMounted.current) {
-          const aioData = await aioRes.json();
-          if (aioData && aioData.data) {
-            title = aioData.data.title || title;
-            if (Array.isArray(aioData.data.downloads)) {
-              aioData.data.downloads.forEach((item, index) => {
-                const itemUrl = sanitizeUrl(item.url);
-                if (itemUrl) {
-                  const qLabel = item.quality || item.format || 'HD Quality';
-                  parsedFormats.push({
-                    id: `vkr_${index}_${Date.now()}`,
-                    quality: String(qLabel),
-                    url: itemUrl,
-                    isAudio: Boolean(item.isAudio) || item.format === 'mp3' || String(qLabel).toLowerCase().includes('audio'),
-                  });
-                }
-              });
-            }
-          }
+        } else if (data && data.error) {
+          errorMessage = String(data.error);
         }
-      } catch (e) {}
-    }
-
-    // ফলব্যাক ৩: ইউটিউব ব্যাকআপ লিংক
-    if (parsedFormats.length === 0 && platform === 'youtube' && isMounted.current) {
-      const ytId = extractYoutubeId(cleanUrl);
-      if (ytId) {
-        title = `YouTube Video (${ytId})`;
-        parsedFormats = [
-          { id: `yt_720_${Date.now()}`, quality: '720p HD Quality', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=22`, isAudio: false },
-          { id: `yt_360_${Date.now()}`, quality: '360p SD Quality', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=18`, isAudio: false },
-          { id: `yt_140_${Date.now()}`, quality: 'Audio Only (MP3)', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=140`, isAudio: true },
-        ];
+      } else {
+        // সার্ভার নন-2xx রেসপন্স দিলে স্ট্যাটাস কোড সহ স্পষ্ট মেসেজ
+        errorMessage = `সার্ভার এরর (কোড: ${response.status})। কিছুক্ষণ পর আবার চেষ্টা করুন।`;
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        errorMessage = 'সার্ভার থেকে রেসপন্স পেতে দেরি হচ্ছে (টাইমআউট)। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।';
+      } else {
+        errorMessage = 'নেটওয়ার্ক সমস্যা হয়েছে। ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন।';
       }
     }
 
@@ -303,13 +245,18 @@ export default function DownloadScreen(props) {
       if (parsedFormats.length > 0) {
         setDownloadFormats(parsedFormats);
         setVideoTitle(title);
+        if (skippedCount > 0) {
+          Alert.alert(
+            'কিছু ফরম্যাট বাদ পড়েছে',
+            `${skippedCount}টি ফরম্যাটের লিংক পাওয়া যায়নি, তাই সেগুলো দেখানো হয়নি।`
+          );
+        }
       } else {
-        Alert.alert('ব্যর্থ', 'ভিডিওটি প্রক্রিয়া করা সম্ভব হয়নি। লিংকটি সঠিক আছে কিনা তা নিশ্চিত করুন।');
+        Alert.alert('ব্যর্থ', errorMessage || 'ভিডিও লিংক ফেচ করা যায়নি। ব্যাকএন্ড রেসপন্স এবং লিংকটি চেক করুন।');
       }
     }
-  }, [adminSettings, detectPlatform, extractYoutubeId, fetchWithTimeout, sanitizeUrl, url]);
+  }, [adminSettings, detectPlatform, sanitizeUrl, url]);
 
-  // ৮. ডাউনলোড ক্যানসেলেশন লজিক
   const cancelDownload = useCallback(async () => {
     isCancelled.current = true;
     try {
@@ -323,120 +270,169 @@ export default function DownloadScreen(props) {
       if (isMounted.current) {
         setDownloadingUrl(null);
         setDownloadProgress(0);
+        setDownloadComplete(false);
+        setIsSaving(false);
       }
-      Alert.alert('বাতিল করা হয়েছে', 'ডাউনলোড সম্পূর্ণ হওয়ার পূর্বেই বাতিল করা হয়েছে।');
+      Alert.alert('বাতিল', 'ডাউনলোড বাতিল করা হয়েছে।');
     }
   }, [cleanupTempFile]);
 
-  // ৯. অ্যান্ড্রয়েড ১৩+ ও iOS পারমিশন
+  // ২. পারমিশন হ্যান্ডলিং
   const requestMediaPermissions = useCallback(async () => {
     try {
       const { status: existingStatus, canAskAgain } = await MediaLibrary.getPermissionsAsync();
       if (existingStatus === 'granted') return true;
 
-      if (canAskAgain) {
-        const { status: newStatus } = await MediaLibrary.requestPermissionsAsync();
-        return newStatus === 'granted';
-      }
+      const { status: newStatus } = await MediaLibrary.requestPermissionsAsync(true);
+      if (newStatus === 'granted') return true;
 
-      Alert.alert(
-        'অনুমতি প্রয়োজন',
-        'গ্যালারিতে ভিডিও সেভ করতে স্টোরেজ পারমিশন প্রয়োজন। দয়া করে অ্যাপ সেটিংস থেকে পারমিশন অ্যালাউ করুন।',
-        [
-          { text: 'বাতিল', style: 'cancel' },
-          { text: 'সেটিংস খুলুন', onPress: () => Linking.openSettings() },
-        ]
-      );
+      if (!canAskAgain) {
+        Alert.alert(
+          'অনুমতি প্রয়োজন',
+          'গ্যালারিতে ভিডিও সেভ করতে ডিভাইস পারমিশন সেটিংসে গিয়ে অ্যালাউ করুন।',
+          [
+            { text: 'বাতিল', style: 'cancel' },
+            { text: 'সেটিংস', onPress: () => Linking.openSettings() },
+          ]
+        );
+      }
       return false;
     } catch (e) {
       return false;
     }
   }, []);
 
-  // ১০. কোর ডাউনলোড প্রসেস (Scoped Storage & Header 403 Solution সহ)
   const startInAppDownload = useCallback(async (itemObj) => {
     const fileUrl = sanitizeUrl(itemObj.url);
     const quality = itemObj.quality;
     const isAudio = itemObj.isAudio;
     const downloadKey = itemObj.id || (fileUrl + quality);
 
+    // এই নির্দিষ্ট ডাউনলোডের জন্য একটি লোকাল ক্যান্সেল-টোকেন, যাতে
+    // আগের ডাউনলোডের isCancelled ফ্ল্যাগ পরবর্তী ডাউনলোডকে প্রভাবিত না করে।
+    let localCancelled = false;
+    // ডাউনলোড সফলভাবে শেষ হয়েছে কিনা তার ট্র্যাক — finally ব্লকে
+    // UI ক্লিয়ার করার সিদ্ধান্ত নিতে ব্যবহার হবে (এরর/exception হলেও যেন আটকে না থাকে)।
+    let succeeded = false;
     isCancelled.current = false;
 
     try {
-      const hasPermission = await requestMediaPermissions();
-      if (!hasPermission) return;
+      // MediaLibrary গ্যালারি মূলত ছবি/ভিডিওর জন্য — অডিও ফাইল গ্যালারিতে
+      // যায় না, তাই সেক্ষেত্রে গ্যালারি পারমিশনের প্রয়োজন নেই।
+      if (!isAudio) {
+        const hasPermission = await requestMediaPermissions();
+        if (!hasPermission) return;
+      }
 
       if (isMounted.current) {
         setDownloadingUrl(downloadKey);
         setDownloadProgress(0);
+        setDownloadComplete(false);
+        setIsSaving(false);
       }
 
       const ext = getFileExtension(fileUrl, isAudio);
-
-      // নিরাপদ ফাইল নেমিং প্রসেস
-      let cleanTitle = (videoTitle || 'Media_File')
-        .replace(/[^\p{L}\p{N}_\- ]/gu, '_')
-        .trim()
-        .replace(/\s+/g, '_')
-        .substring(0, 20);
-
-      if (!cleanTitle) cleanTitle = 'Media_File';
+      const cleanTitle = sanitizeFileName(videoTitle || 'Media_File');
 
       const randomId = Math.random().toString(36).substring(2, 6);
       const filename = `${cleanTitle}_${Date.now()}_${randomId}.${ext}`;
-
-      const tempLocalUri = `${FileSystem.documentDirectory}${filename}`;
+      const tempLocalUri = `${FileSystem.cacheDirectory}${filename}`;
       currentTempUri.current = tempLocalUri;
 
+      // থ্রটলড প্রোগ্রেস আপডেট (অপ্রয়োজনীয় রি-রেন্ডার কমাবে)
+      let lastProgress = 0;
       const callback = (downloadProgressData) => {
         if (!isMounted.current || isCancelled.current) return;
         const totalBytes = downloadProgressData.totalBytesExpectedToWrite;
         const writtenBytes = downloadProgressData.totalBytesWritten;
 
         if (totalBytes > 0) {
-          const progress = Math.min(Math.round((writtenBytes / totalBytes) * 100), 99);
-          setDownloadProgress(progress);
+          const progress = Math.min(Math.round((writtenBytes / totalBytes) * 100), 100);
+          if (progress !== lastProgress) {
+            lastProgress = progress;
+            setDownloadProgress(progress);
+          }
         } else {
-          setDownloadProgress((prev) => (prev < 90 ? prev + 2 : prev));
+          setDownloadProgress((prev) => (prev < 90 ? prev + 5 : 95));
         }
       };
 
-      // 403 Forbidden রোডব্লক এড়াতে Headers অবজেক্ট সহ DownloadResumable তৈরি
       activeDownloadResumable.current = FileSystem.createDownloadResumable(
         fileUrl,
         tempLocalUri,
-        { headers: CUSTOM_HEADERS },
+        {},
         callback
       );
 
       const downloadResult = await activeDownloadResumable.current.downloadAsync();
 
-      if (isCancelled.current) return;
-
-      if (!downloadResult || !downloadResult.uri) {
-        throw new Error('Download failed: No file URI generated');
+      // ডাউনলোড নেটওয়ার্ক-পর্যায়ে ক্যান্সেল হয়েছিল কিনা এখানেই চেক করা হচ্ছে।
+      // এর পরে আর isCancelled.current চেক করা হবে না — কারণ ফাইল এখন
+      // ডিস্কে লেখা শেষ, এবং সেভ-পর্যায়ে ক্যান্সেল করাটা অর্থহীন এবং
+      // ভুল "ব্যর্থ" স্টেট তৈরি করে (ফাইল আসলে সেভ হয়ে যাওয়া সত্ত্বেও)।
+      if (isCancelled.current || !downloadResult || !downloadResult.uri) {
+        localCancelled = true;
+        return;
       }
 
-      // ১১. Scoped Storage কমপ্যাটিবল মিডিয়া গ্যালারি সেভিং
-      if (Platform.OS === 'android') {
-        // অ্যান্ড্রয়েড ১০+ ও কাস্টম রম (MIUI/OneUI)-এ স্ক্যানার নিশ্চিত করতে direct save
-        await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
+      // সেভ-পর্যায়ে প্রবেশ — cancelDownload বাটন এখন থেকে লুকানো থাকবে,
+      // যাতে সেভ চলাকালীন ক্যান্সেল চাপলে race condition তৈরি না হয়।
+      if (isMounted.current) {
+        setIsSaving(true);
+      }
+
+      if (isAudio) {
+        // MediaLibrary অডিও অ্যাসেট সাপোর্ট করে না (মূলত ছবি/ভিডিওর জন্য
+        // তৈরি), তাই অডিও ফাইল গ্যালারির বদলে অ্যাপের নিজস্ব ডকুমেন্ট
+        // ফোল্ডারে স্থায়ীভাবে সেভ করা হচ্ছে।
+        const persistentUri = `${FileSystem.documentDirectory}${filename}`;
+        await FileSystem.moveAsync({ from: downloadResult.uri, to: persistentUri });
+        // moveAsync ইতিমধ্যে ফাইলটা cache থেকে সরিয়ে নিয়েছে, তাই আলাদা
+        // করে cleanupTempFile কল করার দরকার নেই।
+        currentTempUri.current = null;
       } else {
-        const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
-        let album = await MediaLibrary.getAlbumAsync('MrDownload');
-        if (album === null) {
-          await MediaLibrary.createAlbumAsync('MrDownload', asset, false);
+        // গ্যালারিতে সেভ করা (ছবি/ভিডিও)
+        if (Platform.OS === 'android') {
+          await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
         } else {
-          await MediaLibrary.addToAlbumAsync([asset], album, false);
+          const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+          let album = await MediaLibrary.getAlbumAsync('MrDownload');
+          if (album === null) {
+            await MediaLibrary.createAlbumAsync('MrDownload', asset, false);
+          } else {
+            await MediaLibrary.addToAlbumAsync([asset], album, false);
+          }
         }
+        await cleanupTempFile(downloadResult.uri);
       }
 
-      if (isMounted.current && !isCancelled.current) {
+      succeeded = true;
+
+      if (isMounted.current) {
+        // ১০০% দেখানোর জন্য সংক্ষিপ্ত বিরতি — এরপর UI ক্লিয়ার হবে
         setDownloadProgress(100);
-        Alert.alert('সফল!', 'ফাইলটি সফলভাবে আপনার গ্যালারিতে সেভ হয়েছে।');
+        setDownloadComplete(true);
+        Alert.alert(
+          'সফল!',
+          isAudio
+            ? 'অডিওটি সফলভাবে অ্যাপের স্টোরেজে সেভ করা হয়েছে।'
+            : 'ভিডিওটি সফলভাবে গ্যালারিতে সেভ করা হয়েছে।'
+        );
+
+        if (completeTimeoutRef.current) {
+          clearTimeout(completeTimeoutRef.current);
+        }
+        completeTimeoutRef.current = setTimeout(() => {
+          if (isMounted.current) {
+            setDownloadingUrl(null);
+            setDownloadProgress(0);
+            setDownloadComplete(false);
+            setIsSaving(false);
+          }
+        }, 1200);
       }
 
-      if (props && typeof props.onDownloadSuccess === 'function' && !isCancelled.current) {
+      if (props && typeof props.onDownloadSuccess === 'function') {
         props.onDownloadSuccess({
           id: Date.now(),
           platform: detectPlatform(url),
@@ -448,24 +444,31 @@ export default function DownloadScreen(props) {
       }
     } catch (err) {
       if (!isCancelled.current) {
-        Alert.alert('ডাউনলোড ব্যর্থ', 'ফাইলটি ডাউনলোড বা সেভ করা সম্ভব হয়নি। নেটওয়ার্ক কানেকশন অথবা লিংকটি পরীক্ষা করুন।');
+        Alert.alert('ডাউনলোড ব্যর্থ', 'ডাউনলোড সম্পন্ন করা যায়নি। মেমোরি পারমিশন বা নেটওয়ার্ক চেক করুন।');
       }
     } finally {
       activeDownloadResumable.current = null;
       await cleanupTempFile();
-      if (isMounted.current) {
+      // সফলভাবে শেষ হওয়া ডাউনলোডের ক্ষেত্রে ১০০% স্টেট কিছুক্ষণ দেখানোর জন্য
+      // এখানে downloadingUrl রিসেট করা হচ্ছে না (উপরের setTimeout তা করবে)।
+      // অন্য যেকোনো ক্ষেত্রে — ক্যান্সেল, নেটওয়ার্ক এরর, পারমিশন ব্যর্থতা,
+      // বা যেকোনো exception — succeeded false থাকবে, তাই UI এখানেই রিসেট হবে
+      // এবং প্রোগ্রেস বার/বাটন স্ক্রিনে আটকে থাকবে না।
+      if (isMounted.current && !succeeded) {
         setDownloadingUrl(null);
         setDownloadProgress(0);
+        setDownloadComplete(false);
+        setIsSaving(false);
       }
       isCancelled.current = false;
     }
-  }, [cleanupTempFile, detectPlatform, getFileExtension, props, requestMediaPermissions, sanitizeUrl, url, videoTitle]);
+  }, [cleanupTempFile, detectPlatform, getFileExtension, props, requestMediaPermissions, sanitizeFileName, sanitizeUrl, url, videoTitle]);
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
         <Text style={styles.appTitle}>MR DOWNLOAD</Text>
-        <Text style={styles.subtitle}>সোশ্যাল মিডিয়া ভিডিও ডাউনলোডার</Text>
+        <Text style={styles.subtitle}>সোশ্যাল মিডিয়া ভিডিও ডাউনলোডার</Text>
       </View>
 
       <View style={styles.inputContainer}>
@@ -542,11 +545,19 @@ export default function DownloadScreen(props) {
                   <View style={styles.progressSection}>
                     <View style={styles.progressContainer}>
                       <View style={[styles.progressBar, { width: `${downloadProgress}%` }]} />
-                      <Text style={styles.progressText}>ডাউনলোড হচ্ছে: {downloadProgress}%</Text>
+                      <Text style={styles.progressText}>
+                        {downloadComplete
+                          ? 'সম্পন্ন হয়েছে ✓'
+                          : isSaving
+                          ? 'সেভ করা হচ্ছে...'
+                          : `ডাউনলোড হচ্ছে: ${downloadProgress}%`}
+                      </Text>
                     </View>
-                    <TouchableOpacity style={styles.cancelBtn} onPress={cancelDownload}>
-                      <Text style={styles.cancelBtnText}>বাতিল</Text>
-                    </TouchableOpacity>
+                    {!downloadComplete && !isSaving ? (
+                      <TouchableOpacity style={styles.cancelBtn} onPress={cancelDownload}>
+                        <Text style={styles.cancelBtnText}>বাতিল</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 ) : null}
               </View>
