@@ -38,6 +38,7 @@ export default function DownloadScreen(props) {
   const [downloadProgress, setDownloadProgress] = useState(0);
 
   const detectPlatform = (link) => {
+    if (!link) return 'video';
     const l = link.toLowerCase();
     if (l.indexOf('youtube.com') !== -1 || l.indexOf('youtu.be') !== -1) return 'youtube';
     if (l.indexOf('tiktok.com') !== -1) return 'tiktok';
@@ -416,7 +417,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
-    justify.content: 'center',
+    justifyContent: 'center',
     opacity: 0.7,
   },
   downloadBtnText: {
@@ -444,7 +445,7 @@ const styles = StyleSheet.create({
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justify.content: 'space-between',
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
