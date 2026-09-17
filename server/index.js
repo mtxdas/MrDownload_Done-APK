@@ -1,20 +1,3 @@
-const express = require('express');
-const cors = require('cors');
-const youtubeDl = require('yt-dlp-exec');
-
-const app = express();
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT || 10000;
-
-// Health Check Route
-app.get('/', (req, res) => {
-  res.send('Multi-Platform Video Downloader Server is Running!');
-});
-
 // Video Downloader Endpoint
 app.post('/download', async (req, res) => {
   const { videoUrl } = req.body;
@@ -26,18 +9,21 @@ app.post('/download', async (req, res) => {
   try {
     const output = await youtubeDl(videoUrl, {
       getUrl: true,
-      format: 'best',
       noCheckCertificates: true,
       noWarnings: true,
       preferFreeFormats: true,
       addHeader: ['referer:youtube.com', 'user-agent:googlebot']
     });
 
+    // output সাধারণত একটি স্ট্রিং লিংক রিটার্ন করে যদি getUrl: true থাকে
+    const downloadUrl = typeof output === 'string' ? output.trim() : String(output).trim();
+
     return res.json({
       success: true,
       message: 'Link extracted successfully',
-      download_url: output.trim()
+      download_url: downloadUrl
     });
+
   } catch (error) {
     console.error('Download Error:', error.message);
     return res.status(500).json({
@@ -46,8 +32,4 @@ app.post('/download', async (req, res) => {
       error: error.message
     });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
 });
