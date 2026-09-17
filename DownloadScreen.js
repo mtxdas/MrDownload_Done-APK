@@ -9,7 +9,6 @@ import {
   Alert,
   Keyboard,
   ScrollView,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
@@ -76,7 +75,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     let parsedFormats = [];
     let title = `${platform.toUpperCase()} Media`;
 
-    // ১. প্রাইমারি ব্যাকএন্ড API
+    // ১. প্রাইমারি ব্যাকএন্ড API (Render)
     try {
       let targetUrl = adminSettings?.apiUrl || 'https://mrdownload-apk.onrender.com/download';
       if (!targetUrl.endsWith('/download')) {
@@ -84,7 +83,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(targetUrl, {
         method: 'POST',
@@ -120,10 +119,32 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         }
       }
     } catch (err) {
-      console.log('Primary Backend Error / Timeout');
+      console.log('Primary Backend Failed or Timeout');
     }
 
-    // ২. ফলব্যাক Cobalt API
+    // ২. শক্তিশালী ব্যাকআপ পাবলিক ডাউনলোডার API (AIO Downloader)
+    if (parsedFormats.length === 0) {
+      try {
+        const aioRes = await fetch(`https://api.vkrdown.com/api/item?url=${encodeURIComponent(cleanUrl)}`);
+        if (aioRes.ok) {
+          const aioData = await aioRes.json();
+          if (aioData && aioData.data) {
+            title = aioData.data.title || title;
+            if (Array.isArray(aioData.data.downloads) && aioData.data.downloads.length > 0) {
+              parsedFormats = aioData.data.downloads.map((item) => ({
+                quality: item.quality || item.format || 'HD Quality',
+                url: item.url,
+                isAudio: item.format === 'mp3' || item.quality?.includes('audio'),
+              })).filter(f => f.url);
+            }
+          }
+        }
+      } catch (e) {
+        console.log('VKR API Failed');
+      }
+    }
+
+    // ৩. ব্যাকআপ Cobalt API
     if (parsedFormats.length === 0) {
       const cobaltEndpoints = [
         'https://co.wuk.sh/api/json',
@@ -138,10 +159,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
               'Accept': 'application/json',
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              url: cleanUrl,
-              vQuality: 'max',
-            }),
+            body: JSON.stringify({ url: cleanUrl, vQuality: 'max' }),
           });
 
           if (cobaltRes.ok) {
@@ -168,6 +186,19 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       }
     }
 
+    // ৪. ইউটিউব ইনভিডিয়াস ও পাইপড ব্যাকআপ স্ট্রিম (YouTube Fallback)
+    if (parsedFormats.length === 0 && platform === 'youtube') {
+      const ytId = extractYoutubeId(cleanUrl);
+      if (ytId) {
+        title = `YouTube Video (${ytId})`;
+        parsedFormats = [
+          { quality: '720p HD Quality', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=22` },
+          { quality: '360p SD Quality', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=18` },
+          { quality: 'Audio Only (MP3)', url: `https://yt.artemislena.eu/latest_version?id=${ytId}&itag=140`, isAudio: true }
+        ];
+      }
+    }
+
     setLoading(false);
 
     if (parsedFormats.length > 0) {
@@ -177,13 +208,12 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       setDownloadFormats(uniqueFormats);
       setVideoTitle(title);
     } else {
-      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। ব্যাকএন্ড সার্ভার চালু আছে কিনা তা পরীক্ষা করে আবার চেষ্টা করুন।');
+      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। ইন্টারনেট কানেকশন বা অন্য একটি ভিডিও লিংক দিয়ে চেষ্টা করুন।');
     }
   };
 
   const startInAppDownload = async (fileUrl, quality, isAudio = false) => {
     try {
-      // পারমিশন চাওয়া
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (permission.status !== 'granted') {
         Alert.alert('অনুমতি প্রয়োজন', 'ফাইল ইন্টারনাল মেমোরিতে সেভ করার জন্য পারমিশন দিন।');
@@ -198,7 +228,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       const filename = `${cleanTitle}_${Date.now()}.${ext}`;
       const tempLocalUri = FileSystem.cacheDirectory + filename;
 
-      // প্রোগ্রেস ট্র্যাকার
       const callback = (downloadProgressData) => {
         if (downloadProgressData.totalBytesExpectedToWrite > 0) {
           const progress = downloadProgressData.totalBytesWritten / downloadProgressData.totalBytesExpectedToWrite;
@@ -213,17 +242,14 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         callback
       );
 
-      // ১. ফাইল ক্যাশে ডাউনলোড করা
       const downloadResult = await downloadResumable.downloadAsync();
 
       if (!downloadResult || !downloadResult.uri) {
         throw new Error('ডাউনলোড অসম্পূর্ণ রয়ে গেছে');
       }
 
-      // ২. মিডিয়া এসেট তৈরি করা
+      // 'MrDownload' ফোল্ডারে সেভ নিশ্চিত করা
       const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
-
-      // ৩. 'MrDownload' ফোল্ডারে সেভ নিশ্চিত করা
       let album = await MediaLibrary.getAlbumAsync('MrDownload');
       if (album === null) {
         await MediaLibrary.createAlbumAsync('MrDownload', asset, false);
@@ -231,12 +257,11 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         await MediaLibrary.addToAlbumAsync([asset], album, false);
       }
 
-      // অস্থায়ী ফাইল ডিলেট
       await FileSystem.deleteAsync(tempLocalUri, { idempotent: true });
 
       Alert.alert(
         'ডাউনলোড সফল!',
-        `ফাইলটি আপনার Internal Storage/MrDownload ফোল্ডারে সফলভাবে সেভ হয়েছে।`
+        `ফাইলটি আপনার Internal Storage/MrDownload ফোল্ডারে সেভ হয়েছে।`
       );
 
       const platform = detectPlatform(url);
@@ -252,7 +277,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       }
     } catch (err) {
       console.log('Download Error:', err);
-      Alert.alert('ডাউনলোড ব্যর্থ', 'ফাইল ডাউনলোডে সমস্যা হয়েছে। লিংক বা ইন্টারনেট কানেকশন পরীক্ষা করুন।');
+      Alert.alert('ডাউনলোড ব্যর্থ', 'ভিডিওটি সেভ করতে সমস্যা হয়েছে। অন্য কোনো কোয়ালিটি চেষ্টা করুন।');
     } finally {
       setDownloadingUrl(null);
       setDownloadProgress(0);
@@ -381,7 +406,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
-    justifyContent: 'center',
+    justify.content: 'center',
     elevation: 4,
   },
   downloadBtnText: {
@@ -409,7 +434,7 @@ const styles = StyleSheet.create({
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justify.content: 'space-between',
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
