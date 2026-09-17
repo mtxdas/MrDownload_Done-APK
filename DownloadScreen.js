@@ -32,7 +32,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
   const [downloadFormats, setDownloadFormats] = useState([]);
   const [videoTitle, setVideoTitle] = useState('');
 
-  // ব্যাকগ্রাউন্ড ডাউনলোড ও প্রোগ্রেস স্টেট
   const [downloadingUrl, setDownloadingUrl] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
@@ -44,8 +43,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     if (l.includes('facebook.com') || l.includes('fb.watch')) return 'facebook';
     if (l.includes('twitter.com') || l.includes('x.com')) return 'twitter';
     if (l.includes('vimeo.com')) return 'vimeo';
-    if (l.includes('xhamster.com')) return 'xhamster';
-    if (l.includes('xnxx.com')) return 'xnxx';
     return 'video';
   };
 
@@ -63,25 +60,57 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     setVideoTitle('');
     Keyboard.dismiss();
 
+    let parsedFormats = [];
+    let title = `${platform.toUpperCase()} Media`;
+
+    // ১. প্রাইমারি ব্যাকএন্ডে রিকোয়েস্ট (Render Backend)
     try {
       let targetUrl = adminSettings?.apiUrl || 'https://mrdownload-apk.onrender.com/download';
       if (!targetUrl.endsWith('/download')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/download';
       }
 
-      let response = await fetch(targetUrl, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      const response = await fetch(targetUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoUrl: cleanUrl }),
+        signal: controller.signal,
       });
 
-      let data = await response.json();
+      clearTimeout(timeoutId);
 
-      // Cobalt API Fallback
-      if (!response.ok || (!data.download_url && !data.downloadUrl && !data.url && !data.picker && !data.formats && !data.medias)) {
-        const cobaltRes = await fetch('https://co.wuk.sh/api/json', {
+      if (response.ok) {
+        const data = await response.json();
+        title = data.title || data.filename || title;
+
+        const itemsList = data.picker || data.formats || data.medias || data.qualities;
+        if (Array.isArray(itemsList) && itemsList.length > 0) {
+          parsedFormats = itemsList
+            .map((item, index) => ({
+              quality: item.quality || item.resolution || item.type || item.label || `Option ${index + 1}`,
+              url: item.url || item.download_url || item.link,
+              isAudio: (item.quality || '').toLowerCase().includes('audio') || (item.quality || '').toLowerCase().includes('mp3'),
+            }))
+            .filter((f) => f.url);
+        } else if (data.download_url || data.downloadUrl || data.url) {
+          const mainUrl = data.download_url || data.downloadUrl || data.url;
+          parsedFormats.push({ quality: '1080p Full HD (Best)', url: mainUrl });
+          parsedFormats.push({ quality: '720p HD (Standard)', url: mainUrl });
+          parsedFormats.push({ quality: '480p / 360p (SD Quality)', url: mainUrl });
+          parsedFormats.push({ quality: 'Audio Only (MP3)', url: mainUrl, isAudio: true });
+        }
+      }
+    } catch (err) {
+      console.log('Primary Backend Failed/Timed out, Trying Fallback APIs...');
+    }
+
+    // ২. ফলব্যাক API (ইউটিউব ও অন্যান্য সোশ্যাল প্ল্যাটফর্মের জন্য)
+    if (parsedFormats.length === 0) {
+      try {
+        const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
           method: 'POST',
           headers: {
             'Accept': 'application/json',
@@ -92,66 +121,101 @@ export default function DownloadScreen({ onDownloadSuccess }) {
             vQuality: 'max',
           }),
         });
-        data = await cobaltRes.json();
-      }
 
-      let parsedFormats = [];
-      const itemsList = data.picker || data.formats || data.medias || data.qualities;
-
-      if (Array.isArray(itemsList) && itemsList.length > 0) {
-        parsedFormats = itemsList
-          .map((item, index) => ({
-            quality: item.quality || item.resolution || item.type || item.label || `Option ${index + 1}`,
-            url: item.url || item.download_url || item.link,
-          }))
-          .filter((f) => f.url);
+        if (cobaltRes.ok) {
+          const cobaltData = await cobaltRes.json();
+          if (cobaltData.picker && Array.isArray(cobaltData.picker)) {
+            parsedFormats = cobaltData.picker.map((item, idx) => ({
+              quality: item.quality || `Quality Option ${idx + 1}`,
+              url: item.url,
+            }));
+          } else if (cobaltData.url) {
+            parsedFormats = [
+              { quality: '1080p Full HD', url: cobaltData.url },
+              { quality: '720p HD', url: cobaltData.url },
+              { quality: '480p SD Quality', url: cobaltData.url },
+              { quality: 'Audio Only (MP3)', url: cobaltData.url, isAudio: true },
+            ];
+          }
+        }
+      } catch (cobaltErr) {
+        console.log('Cobalt API Failed');
       }
+    }
 
-      if (parsedFormats.length === 0) {
-        if (data.hd || data.hd_url) parsedFormats.push({ quality: 'HD Quality (1080p)', url: data.hd || data.hd_url });
-        if (data.sd || data.sd_url) parsedFormats.push({ quality: 'SD Quality (720p/360p)', url: data.sd || data.sd_url });
-      }
+    // ৩. ৩য় ফলব্যাক API (Direct Invidious / Public Tube Extractor)
+    if (parsedFormats.length === 0 && platform === 'youtube') {
+      try {
+        let videoId = '';
+        if (cleanUrl.includes('v=')) {
+          videoId = cleanUrl.split('v=')[1]?.split('&')[0];
+        } else if (cleanUrl.includes('youtu.be/')) {
+          videoId = cleanUrl.split('youtu.be/')[1]?.split('?')[0];
+        }
 
-      const singleUrl = data.download_url || data.downloadUrl || data.url;
-      if (parsedFormats.length === 0 && singleUrl) {
-        parsedFormats.push({ quality: 'HD / Best Quality', url: singleUrl });
+        if (videoId) {
+          const ytApiRes = await fetch(`https://inv.riverside.rocks/api/v1/videos/${videoId}`);
+          if (ytApiRes.ok) {
+            const ytData = await ytApiRes.json();
+            title = ytData.title || title;
+            if (ytData.adaptiveFormats) {
+              ytData.adaptiveFormats.forEach((fmt) => {
+                if (fmt.qualityLabel && fmt.url) {
+                  parsedFormats.push({
+                    quality: `${fmt.qualityLabel} (${fmt.container || 'mp4'})`,
+                    url: fmt.url,
+                    isAudio: false,
+                  });
+                }
+              });
+            }
+          }
+        }
+      } catch (ytErr) {
+        console.log('YouTube Specific API Failed');
       }
+    }
 
-      if (parsedFormats.length > 0) {
-        setDownloadFormats(parsedFormats);
-        setVideoTitle(data.title || data.filename || `${platform.toUpperCase()} Video`);
-      } else {
-        Alert.alert('ত্রুটি', data.message || 'ভিডিওটি বিশ্লেষণ করা সম্ভব হয়নি। লিঙ্কটি আবার পরীক্ষা করুন।');
-      }
-    } catch (error) {
-      Alert.alert('ব্যর্থ', error.message || 'নেটওয়ার্ক সমস্যা অথবা সার্ভার সাড়া দিচ্ছে না।');
-    } finally {
-      setLoading(false);
+    setLoading(false);
+
+    if (parsedFormats.length > 0) {
+      // ইউনিক ফরম্যাট ফিল্টারিং
+      const uniqueFormats = Array.from(new Set(parsedFormats.map(a => a.quality)))
+        .map(quality => {
+          return parsedFormats.find(a => a.quality === quality);
+        });
+
+      setDownloadFormats(uniqueFormats);
+      setVideoTitle(title);
+    } else {
+      Alert.alert('ব্যর্থ', 'ভিডিওটি সার্ভার থেকে বিশ্লেষণ করা সম্ভব হয়নি। সংযোগ চেক করে আবার চেষ্টা করুন।');
     }
   };
 
-  // expo-file-system দিয়ে সরাসরি মেমোরিতে ভিডিও ডাউনলোড ফাংশন
-  const startInAppDownload = async (fileUrl, quality) => {
+  const startInAppDownload = async (fileUrl, quality, isAudio = false) => {
     try {
-      // ১. মেমোরি পারমিশন চাওয়া
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('পারমিশন প্রয়োজন', 'গ্যালারিতে ভিডিও সেভ করার জন্য পারমিশন দিন।');
         return;
       }
 
-      setDownloadingUrl(fileUrl);
+      setDownloadingUrl(fileUrl + quality);
       setDownloadProgress(0);
 
-      const filename = `MR_Download_${Date.now()}.mp4`;
+      const ext = isAudio ? 'mp3' : 'mp4';
+      const filename = `MR_Download_${Date.now()}.${ext}`;
       const fileUri = FileSystem.documentDirectory + filename;
 
-      // ২. ডাউনলোডের প্রোগ্রেস ট্র্যাক করা
       const callback = (downloadProgressData) => {
-        const progress =
-          downloadProgressData.totalBytesWritten /
-          downloadProgressData.totalBytesExpectedToWrite;
-        setDownloadProgress(Math.round(progress * 100));
+        if (downloadProgressData.totalBytesExpectedToWrite > 0) {
+          const progress =
+            downloadProgressData.totalBytesWritten /
+            downloadProgressData.totalBytesExpectedToWrite;
+          setDownloadProgress(Math.round(progress * 100));
+        } else {
+          setDownloadProgress(50);
+        }
       };
 
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -161,20 +225,17 @@ export default function DownloadScreen({ onDownloadSuccess }) {
         callback
       );
 
-      // ৩. ব্যাকগ্রাউন্ড ডাউনলোড শুরু
       const { uri } = await downloadResumable.downloadAsync();
-
-      // ৪. গ্যালারি/মিডিয়া লাইব্রেরিতে সেভ করা
       await MediaLibrary.saveToLibraryAsync(uri);
 
-      Alert.alert('সফল!', 'ভিডিওটি সফলভাবে আপনার ফোনের গ্যালারিতে সেভ হয়েছে।');
+      Alert.alert('সফল!', `ফাইলটি গ্যালারিতে সেভ করা হয়েছে (${quality})`);
 
       const platform = detectPlatform(url);
       if (onDownloadSuccess) {
         onDownloadSuccess({
           id: Date.now(),
           platform: platform,
-          title: videoTitle || `${platform.toUpperCase()} Video`,
+          title: videoTitle || `${platform.toUpperCase()} Media`,
           quality: quality || 'HD',
           size: 'Auto',
           time: 'এখনই',
@@ -230,24 +291,27 @@ export default function DownloadScreen({ onDownloadSuccess }) {
 
       {downloadFormats.length > 0 && (
         <View style={styles.formatContainer}>
-          <Text style={styles.formatTitle}>ডাউনলোড ফরম্যাট সিলেক্ট করুন:</Text>
+          <Text style={styles.formatTitle}>কোয়ালিটি / ফরম্যাট সিলেক্ট করুন:</Text>
           {downloadFormats.map((item, index) => {
-            const isThisDownloading = downloadingUrl === item.url;
+            const isThisDownloading = downloadingUrl === (item.url + item.quality);
             return (
               <View key={index} style={styles.formatCardWrapper}>
                 <TouchableOpacity
                   style={styles.formatCard}
-                  onPress={() => startInAppDownload(item.url, item.quality)}
+                  onPress={() => startInAppDownload(item.url, item.quality, item.isAudio)}
                   disabled={!!downloadingUrl}
                 >
                   <View style={styles.formatInfo}>
-                    <Ionicons name="download-outline" size={22} color={COLORS.green} />
+                    <Ionicons 
+                      name={item.isAudio ? "musical-notes-outline" : "film-outline"} 
+                      size={22} 
+                      color={item.isAudio ? COLORS.purple : COLORS.green} 
+                    />
                     <Text style={styles.formatText}>{item.quality}</Text>
                   </View>
                   <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} />
                 </TouchableOpacity>
 
-                {/* প্রোগ্রেস বার (Progress Bar) */}
                 {isThisDownloading && (
                   <View style={styles.progressContainer}>
                     <View style={[styles.progressBar, { width: `${downloadProgress}%` }]} />
