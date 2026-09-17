@@ -41,7 +41,7 @@ jobs:
       - name: Build Android Release APK
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon -x test
+          ./gradlew assembleRelease --no-daemon --stacktrace -x test
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
 
