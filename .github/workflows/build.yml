@@ -20,11 +20,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK Environment
@@ -34,9 +35,7 @@ jobs:
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
 
       - name: Install Dependencies
-        run: |
-          npm install
-          npm install react-native-vector-icons
+        run: npm ci || npm install
 
       - name: Prebuild Android Project
         run: npx expo prebuild --platform android --clean
@@ -47,7 +46,7 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
