@@ -83,7 +83,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // ১৫ সেকেন্ড টাইমআউট
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const response = await fetch(targetUrl, {
         method: 'POST',
@@ -122,7 +122,7 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       console.log('Primary Backend Error / Timeout');
     }
 
-    // ২. ফলব্যাক Cobalt API (কো.উক বা কোবাল্ট টুলস)
+    // ২. ফলব্যাক Cobalt API
     if (parsedFormats.length === 0) {
       const cobaltEndpoints = [
         'https://co.wuk.sh/api/json',
@@ -167,11 +167,10 @@ export default function DownloadScreen({ onDownloadSuccess }) {
       }
     }
 
-    // ৩. ইউটিউব ভিডিওর জন্য ইনফল্ট ব্যাকআপ জেনারেটর (ইউটিউব এরর জিরো করার জন্য)
+    // ৩. ইউটিউব ভিডিওর জন্য ফলব্যাক
     if (parsedFormats.length === 0 && platform === 'youtube') {
       const ytId = extractYoutubeId(cleanUrl);
       if (ytId) {
-        // Direct stream links fallback via working proxies
         const fallbackStream = `https://y2mate.is/download?url=${encodeURIComponent(cleanUrl)}`;
         parsedFormats = [
           { quality: '1080p Full HD (Best Quality)', url: fallbackStream },
@@ -186,7 +185,6 @@ export default function DownloadScreen({ onDownloadSuccess }) {
     setLoading(false);
 
     if (parsedFormats.length > 0) {
-      // ইউনিক রেজোলিউশন ফিল্টার
       const uniqueFormats = Array.from(new Set(parsedFormats.map(a => a.quality)))
         .map(quality => {
           return parsedFormats.find(a => a.quality === quality);
@@ -406,7 +404,7 @@ const styles = StyleSheet.create({
   formatCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justify.content: 'space-between',
+    justifyContent: 'space-between',
     backgroundColor: COLORS.bg,
     padding: 14,
     borderRadius: 10,
