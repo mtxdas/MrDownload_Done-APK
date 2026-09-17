@@ -80,7 +80,7 @@ export default function DownloadScreen(props) {
     let parsedFormats = [];
     let title = platform.toUpperCase() + ' Video';
 
-    // ১. প্রাইমারি Render/Custom সার্ভার
+    // ১. প্রাইমারি ব্যাকএন্ড সার্ভার
     try {
       let targetUrl = (adminSettings && adminSettings.apiUrl) ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
       if (targetUrl.charAt(targetUrl.length - 1) === '/') {
@@ -94,9 +94,9 @@ export default function DownloadScreen(props) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0'
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({ videoUrl: cleanUrl }),
+        body: JSON.stringify({ videoUrl: cleanUrl, url: cleanUrl }),
       });
 
       if (response.ok) {
@@ -126,14 +126,14 @@ export default function DownloadScreen(props) {
         }
       }
     } catch (err) {
-      console.log('Primary Backend Failed');
+      console.log('Primary Backend Error');
     }
 
     // ২. Cobalt API ব্যাকআপ
     if (parsedFormats.length === 0) {
       const cobaltInstances = [
-        'https://cobalt-api.kwiatek.xyz',
-        'https://api.cobalt.tools'
+        'https://api.cobalt.tools',
+        'https://cobalt-api.kwiatek.xyz'
       ];
 
       for (let i = 0; i < cobaltInstances.length; i++) {
@@ -149,7 +149,7 @@ export default function DownloadScreen(props) {
 
           if (cobRes.ok) {
             const cobData = await cobRes.json();
-            if (cobData.status === 'stream' || cobData.status === 'redirect') {
+            if (cobData.status === 'stream' || cobData.status === 'redirect' || cobData.url) {
               parsedFormats.push({ quality: 'HD Quality', url: cobData.url, isAudio: false });
               break;
             }
@@ -206,7 +206,10 @@ export default function DownloadScreen(props) {
       setDownloadFormats(parsedFormats);
       setVideoTitle(title);
     } else {
-      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি প্রসেস করা সম্ভব হয়নি। অন্য একটি লিংক চেষ্টা করুন।');
+      Alert.alert(
+        'ব্যর্থ',
+        'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। আপনার ব্যাকএন্ড সার্ভার চালু আছে কিনা বা সঠিক লিংক পেস্ট করেছেন কিনা পরীক্ষা করুন।'
+      );
     }
   };
 
@@ -403,7 +406,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
-    justifyContent: 'center',
+    justify.content: 'center',
     elevation: 4,
   },
   downloadBtnDisabled: {
