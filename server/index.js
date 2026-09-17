@@ -7,12 +7,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Basic URL validation helper
+const isValidUrl = (url) => {
+  try {
+    new URL(url);
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
 // Video Downloader Endpoint
 app.post('/download', async (req, res) => {
   const { videoUrl } = req.body;
 
   if (!videoUrl) {
     return res.status(400).json({ success: false, message: 'URL is required' });
+  }
+
+  // ইউআরএল সঠিক কিনা যাচাই করা
+  if (!isValidUrl(videoUrl)) {
+    return res.status(400).json({ success: false, message: 'Invalid URL format' });
   }
 
   try {
@@ -25,6 +40,10 @@ app.post('/download', async (req, res) => {
     });
 
     const downloadUrl = typeof output === 'string' ? output.trim() : String(output).trim();
+
+    if (!downloadUrl) {
+      throw new Error('Could not extract direct download link.');
+    }
 
     return res.json({
       success: true,
