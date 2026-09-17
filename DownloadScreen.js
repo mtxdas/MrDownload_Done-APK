@@ -65,7 +65,7 @@ export default function DownloadScreen(props) {
 
   const handleFetchMedia = async () => {
     if (!url || !url.trim()) {
-      Alert.alert('ত্রুটি', 'একটি সঠিক ভিডিও লিংক প্রবেশ করান।');
+      Alert.alert('ত্রুটি', 'একটি সঠিক লিংক লিখুন।');
       return;
     }
 
@@ -80,7 +80,7 @@ export default function DownloadScreen(props) {
     let parsedFormats = [];
     let title = platform.toUpperCase() + ' Video';
 
-    // ১. আপনার প্রাইমারি Render/Custom সার্ভার (Timeout বাড়ানো হয়েছে)
+    // ১. আপনার প্রাইমারি Render/Custom সার্ভার
     try {
       let targetUrl = (adminSettings && adminSettings.apiUrl) ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
       if (targetUrl.charAt(targetUrl.length - 1) === '/') {
@@ -90,9 +90,6 @@ export default function DownloadScreen(props) {
         targetUrl = targetUrl + '/download';
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
@@ -100,10 +97,7 @@ export default function DownloadScreen(props) {
           'User-Agent': 'Mozilla/5.0'
         },
         body: JSON.stringify({ videoUrl: cleanUrl }),
-        signal: controller.signal
       });
-
-      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -132,15 +126,14 @@ export default function DownloadScreen(props) {
         }
       }
     } catch (err) {
-      console.log('Primary Backend inactive or timed out');
+      console.log('Primary Backend Failed');
     }
 
-    // ২. শক্তিশালী ব্যাকআপ: Cobalt API Instances (Universal Fast Downloader)
+    // ২. Cobalt API ব্যাকআপ
     if (parsedFormats.length === 0) {
       const cobaltInstances = [
         'https://cobalt-api.kwiatek.xyz',
-        'https://api.cobalt.tools',
-        'https://cobalt.meow.com'
+        'https://api.cobalt.tools'
       ];
 
       for (let i = 0; i < cobaltInstances.length; i++) {
@@ -157,30 +150,17 @@ export default function DownloadScreen(props) {
           if (cobRes.ok) {
             const cobData = await cobRes.json();
             if (cobData.status === 'stream' || cobData.status === 'redirect') {
-              const resUrl = cobData.url;
-              parsedFormats.push({ quality: 'Best Quality (HD/MP4)', url: resUrl, isAudio: false });
-              parsedFormats.push({ quality: 'Fast Download (SD)', url: resUrl, isAudio: false });
-              break;
-            } else if (cobData.status === 'picker' && Array.isArray(cobData.picker)) {
-              cobData.picker.forEach((p, pIndex) => {
-                if (p.url) {
-                  parsedFormats.push({
-                    quality: p.type === 'photo' ? ('Photo ' + (pIndex + 1)) : ('Quality ' + (pIndex + 1)),
-                    url: p.url,
-                    isAudio: false,
-                  });
-                }
-              });
+              parsedFormats.push({ quality: 'HD Quality', url: cobData.url, isAudio: false });
               break;
             }
           }
         } catch (e) {
-          console.log('Cobalt instance error:', cobaltInstances[i]);
+          console.log('Cobalt Error');
         }
       }
     }
 
-    // ৩. ব্যাকআপ Public API (VKR API)
+    // ৩. VKR Downloader API ব্যাকআপ
     if (parsedFormats.length === 0) {
       try {
         const aioRes = await fetch('https://api.vkrdown.com/api/item?url=' + encodeURIComponent(cleanUrl));
@@ -226,10 +206,7 @@ export default function DownloadScreen(props) {
       setDownloadFormats(parsedFormats);
       setVideoTitle(title);
     } else {
-      Alert.alert(
-        'ব্যর্থ',
-        'ভিডিও লিংকটি বিশ্লেষণ করা সম্ভব হয়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন অথবা ভিন্ন সোশ্যাল মিডিয়া লিংক ব্যবহার করুন।'
-      );
+      Alert.alert('ব্যর্থ', 'ভিডিও লিংকটি প্রসেস করা সম্ভব হয়নি। অন্য একটি লিংক চেষ্টা করুন।');
     }
   };
 
@@ -330,7 +307,7 @@ export default function DownloadScreen(props) {
       </View>
 
       <TouchableOpacity
-        style={[styles.downloadBtn, loading ? styles.disabledBtn : null]}
+        style={loading ? styles.downloadBtnDisabled : styles.downloadBtn}
         onPress={handleFetchMedia}
         disabled={loading}
       >
@@ -426,10 +403,15 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 54,
     alignItems: 'center',
-    justify.content: 'center',
+    justifyContent: 'center',
     elevation: 4,
   },
-  disabledBtn: {
+  downloadBtnDisabled: {
+    backgroundColor: COLORS.purple,
+    borderRadius: 14,
+    height: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
     opacity: 0.7,
   },
   downloadBtnText: {
@@ -480,7 +462,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     height: 18,
     overflow: 'hidden',
-    justify.content: 'center',
+    justifyContent: 'center',
   },
   progressBar: {
     position: 'absolute',
