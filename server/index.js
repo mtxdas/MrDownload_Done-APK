@@ -6,7 +6,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// সার্ভার চেক করার রুট
 app.get('/', (req, res) => res.send('Server is active!'));
 
 app.post('/download', async (req, res) => {
@@ -16,7 +15,6 @@ app.post('/download', async (req, res) => {
   }
 
   try {
-    // yt-dlp দিয়ে সব ফরম্যাট এবং বিস্তারিত ফেচ করা
     const output = await youtubeDl(videoUrl, {
       dumpSingleJson: true,
       noCheckCertificates: true,
@@ -25,32 +23,48 @@ app.post('/download', async (req, res) => {
       addHeader: ['User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'],
     });
 
-    // ফরম্যাট বা পিকার লিস্ট তৈরি করা
     let formatsList = [];
+
+    // কম্বাইন্ড (ভিডিও + অডিও একসাথে) ফরম্যাট ফিল্টার করা
     if (output.formats && Array.isArray(output.formats)) {
-      formatsList = output.formats
-        .filter(f => f.url && (f.vcodec !== 'none' || f.acodec !== 'none'))
-        .map((f, index) => ({
-          id: index,
-          quality: f.format_note || f.resolution || `${f.height || 'Auto'}p`,
-          url: f.url,
-          isAudio: f.vcodec === 'none' && f.acodec !== 'none',
-        }));
+      const combinedFormats = output.formats.filter(f => f.url && f.vcodec !== 'none' && f.acodec !== 'none');
+      
+      if (combinedFormats.length > 0) {
+        formatsList = combinedFormats
+          .sort((a, b) => (b.height || 0) - (a.height || 0))
+          .slice(0, 3) // সর্বোচ্চ ৩টি ভিডিও কোয়ালিটি
+          .map((f, index) => ({
+            id: index,
+            quality: f.height ? `${f.height}p` : (f.format_note || 'HD'),
+            url: f.url,
+            isAudio: false,
+          }));
+      }
     }
 
-    // যদি ফরম্যাট লিস্ট না পাওয়া যায়, তবে মূল ডাউনলোডার লিংক ব্যবহার করা
     if (formatsList.length === 0 && output.url) {
       formatsList.push({
         id: 0,
-        quality: output.resolution || 'HD / Default',
+        quality: output.resolution || '720p (HD)',
         url: output.url,
         isAudio: false,
       });
     }
 
-    if (formatsList.length === 0) {
-      return res.status(400).json({ success: false, error: 'এই ভিডিওটির কোনো ডাউনলোডযোগ্য ফরম্যাট পাওয়া যায়নি।' });
+    // ১টি অডিও ফরম্যাট যোগ করা
+    let audioUrl = '';
+    if (output.formats && Array.isArray(output.formats)) {
+      const audioFormat = output.formats.find(f => f.url && f.vcodec === 'none' && f.acodec !== 'none');
+      if (audioFormat) audioUrl = audioFormat.url;
     }
+    if (!audioUrl && output.url) audioUrl = output.url;
+
+    formatsList.push({
+      id: 'audio_1',
+      quality: 'Audio (MP3)',
+      url: audioUrl,
+      isAudio: true,
+    });
 
     res.json({
       success: true,
@@ -60,7 +74,7 @@ app.post('/download', async (req, res) => {
 
   } catch (error) {
     console.error('Download Error:', error.message);
-    res.status(500).json({ success: false, error: 'সার্ভার ভিডিও প্রসেস করতে ব্যর্থ হয়েছে। লিংকটি সঠিক কি না চেক করুন।' });
+    res.status(500).json({ success: false, error: 'সার্ভার ভিডিও প্রসেস করতে ব্যর্থ হয়েছে।' });
   }
 });
 
