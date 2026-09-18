@@ -139,52 +139,56 @@ export default function DownloadScreen(props) {
     return cleaned || 'Media_File';
   }, []);
 
-  // --- সার্ভার থেকে প্রাপ্ত ফরম্যাট ফিল্টার করে নির্দিষ্ট ৪টি ফরম্যাট নিশ্চিত করা ---
+  // --- সবসময় সুনির্দিষ্ট ৪টি ফরম্যাট (720 HD, 480 MR, 360 MR, MP3) নিশ্চিত করার ফাংশন ---
   const processAndFilterFormats = useCallback((itemsList, fallbackUrl) => {
-    let formatsMap = new Map();
+    let map = new Map();
 
+    // সার্ভার থেকে প্রাপ্ত লিঙ্কগুলো ম্যাপে তোলার চেষ্টা করা
     if (Array.isArray(itemsList) && itemsList.length > 0) {
       itemsList.forEach((item, index) => {
         const rawItemUrl = item.url || item.download_url || item.link;
-        const itemUrl = sanitizeUrl(rawItemUrl) || fallbackUrl;
+        const itemUrl = sanitizeUrl(rawItemUrl);
+        if (!itemUrl) return;
+
         const qLabel = String(item.quality || item.resolution || item.type || item.label || '').toLowerCase();
         const isAudio = item.isAudio || qLabel.includes('audio') || qLabel.includes('mp3');
 
-        if (isAudio) {
-          formatsMap.set('MP3', { id: `p_mp3_${index}`, quality: 'MP3', url: itemUrl, isAudio: true });
-        } else if (qLabel.includes('720') || qLabel.includes('hd')) {
-          formatsMap.set('720 HD', { id: `p_720_${index}`, quality: '720 HD', url: itemUrl, isAudio: false });
-        } else if (qLabel.includes('480') || qLabel.includes('sd')) {
-          formatsMap.set('480 MR', { id: `p_480_${index}`, quality: '480 MR', url: itemUrl, isAudio: false });
-        } else if (qLabel.includes('360')) {
-          formatsMap.set('360 MR', { id: `p_360_${index}`, quality: '360 MR', url: itemUrl, isAudio: false });
+        if (isAudio && !map.has('MP3')) {
+          map.set('MP3', { id: `srv_mp3_${index}`, quality: 'MP3', url: itemUrl, isAudio: true });
+        } else if ((qLabel.includes('720') || qLabel.includes('hd')) && !map.has('720 HD')) {
+          map.set('720 HD', { id: `srv_720_${index}`, quality: '720 HD', url: itemUrl, isAudio: false });
+        } else if ((qLabel.includes('480') || qLabel.includes('sd')) && !map.has('480 MR')) {
+          map.set('480 MR', { id: `srv_480_${index}`, quality: '480 MR', url: itemUrl, isAudio: false });
+        } else if (qLabel.includes('360') && !map.has('360 MR')) {
+          map.set('360 MR', { id: `srv_360_${index}`, quality: '360 MR', url: itemUrl, isAudio: false });
         }
       });
     }
 
-    // যদি সার্ভার থেকে সুনির্দিষ্ট ফরম্যাট না পাওয়া যায়, তবে ডিফল্ট ৪টি ফরম্যাট যুক্ত করে দেওয়া হবে
-    if (!formatsMap.has('720 HD')) {
-      formatsMap.set('720 HD', { id: 'def_720', quality: '720 HD', url: fallbackUrl, isAudio: false });
+    // সার্ভারে না পেলে মূল ভিডিও/ফால்ব্যাক লিঙ্ক দিয়ে ৪টি ফরম্যাট ফিক্সড করে দেওয়া
+    const validUrl = fallbackUrl || 'https://www.w3schools.com/html/mov_bbb.mp4';
+    const audioUrl = fallbackUrl || 'https://www.w3schools.com/html/horse.mp3';
+
+    if (!map.has('720 HD')) {
+      map.set('720 HD', { id: 'def_720', quality: '720 HD', url: validUrl, isAudio: false });
     }
-    if (!formatsMap.has('480 MR')) {
-      formatsMap.set('480 MR', { id: 'def_480', quality: '480 MR', url: fallbackUrl, isAudio: false });
+    if (!map.has('480 MR')) {
+      map.set('480 MR', { id: 'def_480', quality: '480 MR', url: validUrl, isAudio: false });
     }
-    if (!formatsMap.has('360 MR')) {
-      formatsMap.set('360 MR', { id: 'def_360', quality: '360 MR', url: fallbackUrl, isAudio: false });
+    if (!map.has('360 MR')) {
+      map.set('360 MR', { id: 'def_360', quality: '360 MR', url: validUrl, isAudio: false });
     }
-    if (!formatsMap.has('MP3')) {
-      formatsMap.set('MP3', { id: 'def_mp3', quality: 'MP3', url: fallbackUrl, isAudio: true });
+    if (!map.has('MP3')) {
+      map.set('MP3', { id: 'def_mp3', quality: 'MP3', url: audioUrl, isAudio: true });
     }
 
-    const orderedKeys = ['720 HD', '480 MR', '360 MR', 'MP3'];
-    let finalFormats = [];
-    orderedKeys.forEach((key) => {
-      if (formatsMap.has(key)) {
-        finalFormats.push(formatsMap.get(key));
-      }
-    });
-
-    return finalFormats;
+    // নির্দিষ্ট সিরিয়ালে রিটার্ন করা
+    return [
+      map.get('720 HD'),
+      map.get('480 MR'),
+      map.get('360 MR'),
+      map.get('MP3'),
+    ];
   }, [sanitizeUrl]);
 
   const handleFetchMedia = useCallback(async () => {
@@ -265,7 +269,6 @@ export default function DownloadScreen(props) {
     let succeeded = false;
     isCancelled.current = false;
 
-    // সঠিক ডাউনলোড লিঙ্কের ব্যাকআপ ব্যবস্থা
     const actualDownloadUrl = fileUrl && fileUrl.startsWith('http') 
       ? fileUrl 
       : (isAudio ? 'https://www.w3schools.com/html/horse.mp3' : 'https://www.w3schools.com/html/mov_bbb.mp4');
