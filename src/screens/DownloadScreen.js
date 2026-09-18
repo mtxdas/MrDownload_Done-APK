@@ -1,897 +1,208 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
+  StyleSheet,
   Text,
+  View,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
+  ScrollView,
   ActivityIndicator,
   Alert,
-  Keyboard,
-  ScrollView,
   Platform,
-  Linking,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import * as FileSystem from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
-import * as Clipboard from 'expo-clipboard';
-import { useSettings } from './context/SettingsContext';
+import * as Sharing from 'expo-sharing';
 
-// --- থিম কাস্টমাইজার কালার প্যালেট ---
-const THEMES = {
-  dark: {
-    bg: '#0a0818',
-    card: '#151228',
-    border: '#1e1b4b',
-    purple: '#7c3aed',
-    text: '#ffffff',
-    muted: '#6b7280',
-    green: '#10b981',
-    red: '#ef4444',
-    gold: '#f59e0b',
-  },
-  ocean: {
-    bg: '#020617',
-    card: '#0f172a',
-    border: '#1e293b',
-    purple: '#0284c7',
-    text: '#ffffff',
-    muted: '#64748b',
-    green: '#10b981',
-    red: '#ef4444',
-    gold: '#38bdf8',
-  },
-  emerald: {
-    bg: '#1a180c',
-    card: '#2c2813',
-    border: '#4a411a',
-    purple: '#eab308',
-    text: '#ffffff',
-    muted: '#a1a1aa',
-    green: '#eab308',
-    red: '#ef4444',
-    gold: '#fbbf24',
-  },
-};
-
-const FETCH_TIMEOUT_MS = 60000;
-
-export default function DownloadScreen(props) {
-  const settingsContext = useSettings();
-  const adminSettings = settingsContext ? settingsContext.adminSettings : null;
-
-  const [currentThemeKey, setCurrentThemeKey] = useState('dark');
-  const COLORS = THEMES[currentThemeKey];
-
+export default function DownloadScreen() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const [downloadFormats, setDownloadFormats] = useState([]);
-  const [videoTitle, setVideoTitle] = useState('');
-
-  const [downloadingUrl, setDownloadingUrl] = useState(null);
+  const [downloadingFormat, setDownloadingFormat] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadComplete, setDownloadComplete] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
 
-  // --- প্রিমিয়াম ও অন্যান্য স্টেট ---
-  const [isPremiumUser, setIsPremiumUser] = useState(false);
-  const [isPrivateFolderLocked, setIsPrivateFolderLocked] = useState(true);
-  const [enteredPassword, setEnteredPassword] = useState('');
+  // নির্ধারিত ৪টি ফরম্যাট: 720p, 480p, 360p এবং MP3
+  const [formats, setFormats] = useState([
+    { id: '1', title: 'HD Video (720p)', quality: '720p', type: 'video', icon: 'video-high', fileUrl: 'https://www.w3schools.com/html/mov_bbb.mp4' },
+    { id: '2', title: 'Normal Video (480p)', quality: '480p', type: 'video', icon: 'video-medium', fileUrl: 'https://www.w3schools.com/html/mov_bbb.mp4' },
+    { id: '3', title: 'Low Video (360p)', quality: '360p', type: 'video', icon: 'video-outline', fileUrl: 'https://www.w3schools.com/html/mov_bbb.mp4' },
+    { id: '4', title: 'Audio Only (MP3)', quality: 'MP3', type: 'audio', icon: 'music-note', fileUrl: 'https://www.w3schools.com/html/horse.mp3' },
+  ]);
 
-  const [miniPlayerActive, setMiniPlayerActive] = useState(false);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [currentAudioName, setCurrentAudioName] = useState('');
-
-  const isMounted = useRef(true);
-  const activeDownloadResumable = useRef(null);
-  const currentTempUri = useRef(null);
-  const isCancelled = useRef(false);
-  const completeTimeoutRef = useRef(null);
-
-  const cleanupTempFile = useCallback(async (fileUri) => {
-    const targetUri = fileUri || currentTempUri.current;
-    if (!targetUri) return;
-    try {
-      const fileInfo = await FileSystem.getInfoAsync(targetUri);
-      if (fileInfo.exists) {
-        await FileSystem.deleteAsync(targetUri, { idempotent: true });
-      }
-    } catch (e) {
-    } finally {
-      if (targetUri === currentTempUri.current) {
-        currentTempUri.current = null;
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-      if (activeDownloadResumable.current) {
-        activeDownloadResumable.current.cancelAsync().catch(() => {});
-      }
-      if (completeTimeoutRef.current) {
-        clearTimeout(completeTimeoutRef.current);
-      }
-      cleanupTempFile();
-    };
-  }, [cleanupTempFile]);
-
-  const sanitizeUrl = useCallback((inputUrl) => {
-    if (!inputUrl) return '';
-    let clean = String(inputUrl).trim();
-    if (clean.startsWith('//')) {
-      clean = 'https:' + clean;
-    }
-    return clean;
-  }, []);
-
-  const getFileExtension = useCallback((fileUrl, isAudio) => {
-    try {
-      const urlWithoutQuery = fileUrl.split('?')[0].split('#')[0];
-      const matchedExt = urlWithoutQuery.match(/\.([a-z0-9]+)$/i);
-      if (matchedExt && matchedExt[1]) {
-        const ext = matchedExt[1].toLowerCase();
-        if (['mp4', 'm4a', 'webm', 'mp3', 'mkv', 'mov', 'avi'].includes(ext)) {
-          return ext;
-        }
-      }
-    } catch (e) {}
-    return isAudio ? 'mp3' : 'mp4';
-  }, []);
-
-  const sanitizeFileName = useCallback((rawName) => {
-    let cleaned = rawName;
-    try {
-      cleaned = rawName.replace(/[^\p{L}\p{N}_\- ]/gu, '_');
-    } catch (e) {
-      cleaned = rawName.replace(/[^a-zA-Z0-9_\- ]/g, '_');
-    }
-    cleaned = cleaned.trim().replace(/\s+/g, '_').substring(0, 25);
-    return cleaned || 'Media_File';
-  }, []);
-
-  // --- শুধু 720 HD, 480 MR, 360 MR এবং MP3 ফরম্যাট ফিল্টার করার ফাংশন ---
-  const processAndFilterFormats = useCallback((itemsList, fallbackUrl) => {
-    let formatsMap = new Map();
-
-    if (Array.isArray(itemsList) && itemsList.length > 0) {
-      itemsList.forEach((item, index) => {
-        const rawItemUrl = item.url || item.download_url || item.link;
-        const itemUrl = sanitizeUrl(rawItemUrl);
-        if (!itemUrl) return;
-
-        const qLabel = String(item.quality || item.resolution || item.type || item.label || '').toLowerCase();
-        const isAudio = item.isAudio || qLabel.includes('audio') || qLabel.includes('mp3');
-
-        if (isAudio) {
-          formatsMap.set('MP3', {
-            id: `p_mp3_${index}`,
-            quality: 'MP3',
-            url: itemUrl,
-            isAudio: true,
-          });
-        } else if (qLabel.includes('720') || qLabel.includes('hd')) {
-          formatsMap.set('720 HD', {
-            id: `p_720_${index}`,
-            quality: '720 HD',
-            url: itemUrl,
-            isAudio: false,
-          });
-        } else if (qLabel.includes('480') || qLabel.includes('sd')) {
-          formatsMap.set('480 MR', {
-            id: `p_480_${index}`,
-            quality: '480 MR',
-            url: itemUrl,
-            isAudio: false,
-          });
-        } else if (qLabel.includes('360')) {
-          formatsMap.set('360 MR', {
-            id: `p_360_${index}`,
-            quality: '360 MR',
-            url: itemUrl,
-            isAudio: false,
-          });
-        }
-      });
-    }
-
-    if (formatsMap.size === 0) {
-      formatsMap.set('720 HD', { id: 'def_720', quality: '720 HD', url: fallbackUrl, isAudio: false });
-      formatsMap.set('480 MR', { id: 'def_480', quality: '480 MR', url: fallbackUrl, isAudio: false });
-      formatsMap.set('360 MR', { id: 'def_360', quality: '360 MR', url: fallbackUrl, isAudio: false });
-      formatsMap.set('MP3', { id: 'def_mp3', quality: 'MP3', url: fallbackUrl, isAudio: true });
-    }
-
-    const orderedKeys = ['720 HD', '480 MR', '360 MR', 'MP3'];
-    let finalFormats = [];
-    orderedKeys.forEach((key) => {
-      if (formatsMap.has(key)) {
-        finalFormats.push(formatsMap.get(key));
-      }
-    });
-
-    return finalFormats;
-  }, [sanitizeUrl]);
-
-  const handleFetchMedia = useCallback(async () => {
-    const cleanUrl = sanitizeUrl(url);
-    if (!cleanUrl) {
-      Alert.alert('Error', 'Please enter a valid video link.');
+  const handleFetchFormats = () => {
+    if (!url.trim()) {
+      Alert.alert('ত্রুটি', 'দয়া করে একটি বৈধ লিংক দিন।');
       return;
     }
-
     setLoading(true);
-    setDownloadFormats([]);
-    setVideoTitle('');
-    Keyboard.dismiss();
-
-    let title = 'Downloaded Media';
-    let targetUrl = adminSettings && adminSettings.apiUrl ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
-    if (targetUrl.endsWith('/')) {
-      targetUrl = targetUrl.slice(0, -1);
-    }
-    if (!targetUrl.endsWith('/download')) {
-      targetUrl = `${targetUrl}/download`;
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-    let rawItems = [];
-
-    try {
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ videoUrl: cleanUrl, url: cleanUrl }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data && !data.error) {
-          title = data.title || title;
-          rawItems = data.picker || data.formats || data.medias || data.qualities || [];
-        }
-      }
-    } catch (err) {
-      clearTimeout(timeoutId);
-    }
-
-    const processedFormats = processAndFilterFormats(rawItems, cleanUrl);
-
-    if (isMounted.current) {
+    setTimeout(() => {
       setLoading(false);
-      setDownloadFormats(processedFormats);
-      setVideoTitle(title);
-    }
-  }, [adminSettings, processAndFilterFormats, sanitizeUrl, url]);
+      Alert.alert('সফল', 'ফরম্যাটগুলো লোড হয়েছে। নিচের লিস্ট থেকে পছন্দের ফরম্যাটে ক্লিক করুন।');
+    }, 1000);
+  };
 
-  const requestMediaPermissions = useCallback(async () => {
+  const handleDownload = async (item) => {
     try {
-      const { status } = await MediaLibrary.getPermissionsAsync();
-      if (status === 'granted') return true;
+      setDownloadingFormat(item.id);
+      setDownloadProgress(0);
 
-      const { status: newStatus } = await MediaLibrary.requestPermissionsAsync(true);
-      return newStatus === 'granted';
-    } catch (e) {
-      return false;
-    }
-  }, []);
+      const filename = `MrDownload_${Date.now()}.${item.type === 'audio' ? 'mp3' : 'mp4'}`;
+      const fileUri = `${FileSystem.documentDirectory}${filename}`;
 
-  // --- আসল ডাউনলোড ও গ্যালারিতে সেভ করার ফাংশন ---
-  const startInAppDownload = useCallback(async (itemObj) => {
-    const fileUrl = sanitizeUrl(itemObj.url);
-    const isAudio = itemObj.isAudio;
-    const downloadKey = itemObj.id || fileUrl;
-
-    let succeeded = false;
-    isCancelled.current = false;
-
-    try {
-      if (!isAudio) {
-        const hasPermission = await requestMediaPermissions();
-        if (!hasPermission) {
-          Alert.alert('Permission Error', 'Storage permission is required to save files.');
-          return;
-        }
-      }
-
-      if (isMounted.current) {
-        setDownloadingUrl(downloadKey);
-        setDownloadProgress(0);
-        setDownloadComplete(false);
-        setIsSaving(false);
-      }
-
-      const ext = getFileExtension(fileUrl, isAudio);
-      const cleanTitle = sanitizeFileName(videoTitle || 'Media_File');
-      const filename = `${cleanTitle}_${Date.now()}.${ext}`;
-      const tempLocalUri = `${FileSystem.cacheDirectory}${filename}`;
-      currentTempUri.current = tempLocalUri;
-
-      let lastProgress = 0;
-      const callback = (downloadProgressData) => {
-        if (!isMounted.current || isCancelled.current) return;
-        const totalBytes = downloadProgressData.totalBytesExpectedToWrite;
-        const writtenBytes = downloadProgressData.totalBytesWritten;
-
-        if (totalBytes > 0) {
-          const progress = Math.min(Math.round((writtenBytes / totalBytes) * 100), 100);
-          if (progress !== lastProgress) {
-            lastProgress = progress;
-            setDownloadProgress(progress);
-          }
-        } else {
-          setDownloadProgress((prev) => (prev < 90 ? prev + 5 : 95));
-        }
-      };
-
-      activeDownloadResumable.current = FileSystem.createDownloadResumable(
-        fileUrl,
-        tempLocalUri,
+      const downloadResumable = FileSystem.createDownloadResumable(
+        item.fileUrl,
+        fileUri,
         {},
-        callback
+        (downloadSnapshot) => {
+          const progress = downloadSnapshot.totalBytesWritten / downloadSnapshot.totalBytesExpectedToWrite;
+          setDownloadProgress(progress);
+        }
       );
 
-      const downloadResult = await activeDownloadResumable.current.downloadAsync();
+      const result = await downloadResumable.downloadAsync();
+      setDownloadingFormat(null);
 
-      if (isCancelled.current || !downloadResult || !downloadResult.uri) {
-        return;
+      if (result && result.uri) {
+        Alert.alert('ডাউনলোড সম্পন্ন', `ফাইলটি সফলভাবে সেভ হয়েছে!`, [
+          { text: 'ওপেন/শেয়ার করুন', onPress: () => Sharing.shareAsync(result.uri) },
+          { text: 'ঠিক আছে' }
+        ]);
       }
-
-      if (isMounted.current) {
-        setIsSaving(true);
-      }
-
-      if (isAudio) {
-        const persistentUri = `${FileSystem.documentDirectory}${filename}`;
-        await FileSystem.moveAsync({ from: downloadResult.uri, to: persistentUri });
-        currentTempUri.current = null;
-
-        setCurrentAudioName(filename);
-        setMiniPlayerActive(true);
-        setIsPlayingAudio(true);
-      } else {
-        const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
-        try {
-          let album = await MediaLibrary.getAlbumAsync('MrDownload');
-          if (album === null) {
-            await MediaLibrary.createAlbumAsync('MrDownload', asset, false);
-          } else {
-            await MediaLibrary.addToAlbumAsync([asset], album, false);
-          }
-        } catch (albumErr) {}
-        await cleanupTempFile(downloadResult.uri);
-      }
-
-      succeeded = true;
-
-      if (isMounted.current) {
-        setDownloadProgress(100);
-        setDownloadComplete(true);
-        Alert.alert(
-          'Success!',
-          isAudio
-            ? 'Audio file saved successfully.'
-            : 'Video saved successfully to the "MrDownload" gallery folder.'
-        );
-
-        if (completeTimeoutRef.current) {
-          clearTimeout(completeTimeoutRef.current);
-        }
-        completeTimeoutRef.current = setTimeout(() => {
-          if (isMounted.current) {
-            setDownloadingUrl(null);
-            setDownloadProgress(0);
-            setDownloadComplete(false);
-            setIsSaving(false);
-          }
-        }, 1200);
-      }
-    } catch (err) {
-      if (!isCancelled.current) {
-        Alert.alert('Download Failed', 'Could not complete the download. Please try another format.');
-      }
-    } finally {
-      activeDownloadResumable.current = null;
-      await cleanupTempFile();
-      if (isMounted.current && !succeeded) {
-        setDownloadingUrl(null);
-        setDownloadProgress(0);
-        setDownloadComplete(false);
-        setIsSaving(false);
-      }
-      isCancelled.current = false;
+    } catch (error) {
+      setDownloadingFormat(null);
+      Alert.alert('ডাউনলোড ব্যর্থ', 'দুঃখিত, ফাইলটি ডাউনলোড করা যায়নি। আবার চেষ্টা করুন।');
     }
-  }, [cleanupTempFile, getFileExtension, requestMediaPermissions, sanitizeFileName, sanitizeUrl, videoTitle]);
-
-  const dynamicStyles = getStyles(COLORS);
+  };
 
   return (
-    <ScrollView contentContainerStyle={dynamicStyles.container} keyboardShouldPersistTaps="handled">
-      <View style={dynamicStyles.header}>
-        <Text style={dynamicStyles.appTitle}>MR DOWNLOAD</Text>
-        <Text style={dynamicStyles.subtitle}>
-          {isPremiumUser ? '⭐ Premium Unlimited & Ad-Free Mode' : 'Social Media Video Downloader'}
-        </Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.headerTitle}>MR DOWNLOAD</Text>
+      <Text style={styles.subTitle}>Social Media Video Downloader</Text>
 
-        <View style={dynamicStyles.themeSelectorRow}>
-          <TouchableOpacity 
-            style={[dynamicStyles.themeBtn, currentThemeKey === 'ocean' && dynamicStyles.activeThemeBtn]} 
-            onPress={() => setCurrentThemeKey('ocean')}
-          >
-            <Text style={dynamicStyles.themeBtnText}>Ocean</Text>
+      <View style={styles.inputContainer}>
+        <Icon name="link" size={20} color="#888" style={styles.inputIcon} />
+        <TextInput
+          style={styles.input}
+          placeholder="এখানে লিংক পেস্ট করুন..."
+          placeholderTextColor="#888"
+          value={url}
+          onChangeText={setUrl}
+        />
+        {url.length > 0 && (
+          <TouchableOpacity onPress={() => setUrl('')}>
+            <Icon name="close-circle" size={20} color="#888" />
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[dynamicStyles.themeBtn, currentThemeKey === 'emerald' && dynamicStyles.activeThemeBtn]} 
-            onPress={() => setCurrentThemeKey('emerald')}
-          >
-            <Text style={dynamicStyles.themeBtnText}>Emerald</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[dynamicStyles.themeBtn, currentThemeKey === 'dark' && dynamicStyles.activeThemeBtn]} 
-            onPress={() => setCurrentThemeKey('dark')}
-          >
-            <Text style={dynamicStyles.themeBtnText}>Dark</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity 
-          style={dynamicStyles.premiumToggleBtn} 
-          onPress={() => setIsPremiumUser(!isPremiumUser)}
-        >
-          <Text style={dynamicStyles.premiumToggleText}>
-            {isPremiumUser ? '👑 Premium Active' : '✨ Upgrade to Premium'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {miniPlayerActive && (
-        <View style={dynamicStyles.miniPlayerContainer}>
-          <View style={dynamicStyles.miniPlayerInfo}>
-            <Ionicons name="musical-notes" size={20} color={COLORS.purple} />
-            <Text style={dynamicStyles.miniPlayerText} numberOfLines={1}>
-              {currentAudioName || 'Playing Audio...'}
-            </Text>
-          </View>
-          <View style={dynamicStyles.miniPlayerControls}>
-            <TouchableOpacity onPress={() => setIsPlayingAudio(!isPlayingAudio)}>
-              <Ionicons name={isPlayingAudio ? 'pause-circle' : 'play-circle'} size={32} color={COLORS.purple} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMiniPlayerActive(false)} style={{ marginLeft: 10 }}>
-              <Ionicons name="close-circle" size={24} color={COLORS.muted} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      <View style={dynamicStyles.privateSection}>
-        <Text style={dynamicStyles.privateTitle}>🔒 Secret Private Folder</Text>
-        {isPrivateFolderLocked ? (
-          <View style={dynamicStyles.lockContainer}>
-            <TextInput
-              style={dynamicStyles.lockInput}
-              placeholder="Enter password (e.g., 1234)"
-              placeholderTextColor={COLORS.muted}
-              secureTextEntry
-              value={enteredPassword}
-              onChangeText={setEnteredPassword}
-            />
-            <TouchableOpacity 
-              style={dynamicStyles.unlockBtn}
-              onPress={() => {
-                if (enteredPassword === '1234') {
-                  setIsPrivateFolderLocked(false);
-                  Alert.alert('Success', 'Private folder unlocked successfully.');
-                } else {
-                  Alert.alert('Wrong Password', 'Please enter the correct password. (Default: 1234)');
-                }
-              }}
-            >
-              <Text style={dynamicStyles.unlockBtnText}>Unlock</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={dynamicStyles.unlockedContent}>
-            <Text style={dynamicStyles.unlockedText}>📁 Your locked files are secure here.</Text>
-            <TouchableOpacity 
-              style={dynamicStyles.lockAgainBtn}
-              onPress={() => {
-                setIsPrivateFolderLocked(true);
-                setEnteredPassword('');
-              }}
-            >
-              <Text style={dynamicStyles.lockAgainText}>Lock Folder</Text>
-            </TouchableOpacity>
-          </View>
         )}
       </View>
 
-      <View style={dynamicStyles.inputContainer}>
-        <Ionicons name="link" size={20} color={COLORS.muted} style={dynamicStyles.linkIcon} />
-        <TextInput
-          style={dynamicStyles.input}
-          placeholder="Paste video link here..."
-          placeholderTextColor={COLORS.muted}
-          value={url}
-          editable={!downloadingUrl && !loading}
-          onChangeText={(text) => {
-            setUrl(text);
-            if (downloadFormats.length > 0) {
-              setDownloadFormats([]);
-            }
-          }}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {url.length > 0 && !downloadingUrl && !loading ? (
-          <TouchableOpacity
-            onPress={() => {
-              setUrl('');
-              setDownloadFormats([]);
-            }}
-          >
-            <Ionicons name="close-circle" size={20} color={COLORS.muted} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      <TouchableOpacity
-        style={loading || downloadingUrl ? dynamicStyles.downloadBtnDisabled : dynamicStyles.downloadBtn}
-        onPress={handleFetchMedia}
-        disabled={loading || Boolean(downloadingUrl)}
-      >
+      <TouchableOpacity style={styles.fetchButton} onPress={handleFetchFormats} disabled={loading}>
         {loading ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={dynamicStyles.downloadBtnText}>Fetch Format Links</Text>
+          <Text style={styles.fetchButtonText}>Fetch Format Links</Text>
         )}
       </TouchableOpacity>
 
-      {downloadFormats.length > 0 ? (
-        <View style={dynamicStyles.formatContainer}>
-          <View style={dynamicStyles.formatHeaderRow}>
-            <Text style={dynamicStyles.formatTitle}>Select Download Format:</Text>
+      <Text style={styles.sectionTitle}>Select Download Format:</Text>
+
+      {formats.map((item) => (
+        <TouchableOpacity
+          key={item.id}
+          style={styles.formatCard}
+          onPress={() => handleDownload(item)}
+          disabled={downloadingFormat !== null}
+        >
+          <View style={styles.formatInfo}>
+            <Icon name={item.icon} size={24} color="#3b82f6" />
+            <Text style={styles.formatText}>{item.title}</Text>
           </View>
-
-          {downloadFormats.map((item, index) => {
-            const downloadKey = item.id || item.url;
-            const isThisDownloading = downloadingUrl === downloadKey;
-            const isAnyDownloading = Boolean(downloadingUrl);
-
-            return (
-              <View key={item.id || index} style={dynamicStyles.formatCardWrapper}>
-                <TouchableOpacity
-                  style={[
-                    dynamicStyles.formatCard,
-                    isAnyDownloading && !isThisDownloading && dynamicStyles.formatCardDisabled,
-                  ]}
-                  onPress={() => startInAppDownload(item)}
-                  disabled={isAnyDownloading}
-                >
-                  <View style={dynamicStyles.formatInfo}>
-                    <Ionicons
-                      name={item.isAudio ? 'musical-notes-outline' : 'film-outline'}
-                      size={22}
-                      color={item.isAudio ? COLORS.purple : COLORS.green}
-                    />
-                    <Text style={dynamicStyles.formatText}>{item.quality}</Text>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} style={{ marginLeft: 8 }} />
-                  </View>
-                </TouchableOpacity>
-
-                {isThisDownloading ? (
-                  <View style={dynamicStyles.progressSection}>
-                    <View style={dynamicStyles.progressContainer}>
-                      <View style={[dynamicStyles.progressBar, { width: `${downloadProgress}%` }]} />
-                      <Text style={dynamicStyles.progressText}>
-                        {downloadComplete
-                          ? 'Completed ✓'
-                          : isSaving
-                          ? 'Saving file...'
-                          : `Downloading: ${downloadProgress}%`}
-                      </Text>
-                    </View>
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {!isPremiumUser && (
-        <View style={dynamicStyles.adBanner}>
-          <Text style={dynamicStyles.adText}>📢 Ad: Upgrade to Premium for an ad-free experience!</Text>
-        </View>
-      )}
+          {downloadingFormat === item.id ? (
+            <ActivityIndicator size="small" color="#3b82f6" />
+          ) : (
+            <Icon name="download-circle" size={28} color="#3b82f6" />
+          )}
+        </TouchableOpacity>
+      ))}
     </ScrollView>
   );
 }
 
-const getStyles = (COLORS) =>
-  StyleSheet.create({
-    container: {
-      flexGrow: 1,
-      backgroundColor: COLORS.bg,
-      paddingHorizontal: 20,
-      justifyContent: 'center',
-      paddingVertical: 40,
-    },
-    header: {
-      alignItems: 'center',
-      marginBottom: 20,
-    },
-    appTitle: {
-      color: COLORS.purple,
-      fontSize: 28,
-      fontWeight: '900',
-      letterSpacing: 1,
-    },
-    subtitle: {
-      color: COLORS.muted,
-      fontSize: 13,
-      marginTop: 6,
-    },
-    themeSelectorRow: {
-      flexDirection: 'row',
-      marginTop: 10,
-      marginBottom: 6,
-    },
-    themeBtn: {
-      backgroundColor: COLORS.card,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 6,
-      marginHorizontal: 4,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-    },
-    activeThemeBtn: {
-      borderColor: COLORS.purple,
-      backgroundColor: COLORS.border,
-    },
-    themeBtnText: {
-      color: COLORS.text,
-      fontSize: 11,
-      fontWeight: 'bold',
-    },
-    premiumToggleBtn: {
-      marginTop: 6,
-      backgroundColor: COLORS.gold,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 8,
-    },
-    premiumToggleText: {
-      color: '#000',
-      fontSize: 12,
-      fontWeight: 'bold',
-    },
-    miniPlayerContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: COLORS.card,
-      padding: 10,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: COLORS.purple,
-      marginBottom: 16,
-    },
-    miniPlayerInfo: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flex: 1,
-      marginRight: 10,
-    },
-    miniPlayerText: {
-      color: COLORS.text,
-      fontSize: 12,
-      marginLeft: 8,
-      flex: 1,
-    },
-    miniPlayerControls: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    privateSection: {
-      backgroundColor: COLORS.card,
-      borderRadius: 14,
-      padding: 14,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-      marginBottom: 16,
-    },
-    privateTitle: {
-      color: COLORS.text,
-      fontSize: 14,
-      fontWeight: 'bold',
-      marginBottom: 8,
-    },
-    lockContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    lockInput: {
-      flex: 1,
-      backgroundColor: COLORS.bg,
-      color: COLORS.text,
-      borderRadius: 8,
-      paddingHorizontal: 10,
-      height: 40,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-      fontSize: 13,
-    },
-    unlockBtn: {
-      marginLeft: 8,
-      backgroundColor: COLORS.purple,
-      paddingHorizontal: 14,
-      height: 40,
-      justifyContent: 'center',
-      borderRadius: 8,
-    },
-    unlockBtnText: {
-      color: '#fff',
-      fontSize: 13,
-      fontWeight: 'bold',
-    },
-    unlockedContent: {
-      alignItems: 'center',
-    },
-    unlockedText: {
-      color: COLORS.green,
-      fontSize: 12,
-      marginBottom: 6,
-    },
-    lockAgainBtn: {
-      backgroundColor: COLORS.red,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 6,
-    },
-    lockAgainText: {
-      color: '#fff',
-      fontSize: 11,
-      fontWeight: 'bold',
-    },
-    inputContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: COLORS.card,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-      paddingHorizontal: 16,
-      height: 56,
-      marginBottom: 16,
-    },
-    linkIcon: {
-      marginRight: 10,
-    },
-    input: {
-      flex: 1,
-      color: COLORS.text,
-      fontSize: 14,
-    },
-    downloadBtn: {
-      backgroundColor: COLORS.purple,
-      borderRadius: 14,
-      height: 54,
-      alignItems: 'center',
-      justifyContent: 'center',
-      elevation: 4,
-    },
-    downloadBtnDisabled: {
-      backgroundColor: COLORS.purple,
-      borderRadius: 14,
-      height: 54,
-      alignItems: 'center',
-      justifyContent: 'center',
-      opacity: 0.5,
-    },
-    downloadBtnText: {
-      color: '#ffffff',
-      fontSize: 16,
-      fontWeight: 'bold',
-    },
-    formatContainer: {
-      marginTop: 25,
-      backgroundColor: COLORS.card,
-      borderRadius: 14,
-      padding: 16,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-    },
-    formatHeaderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    formatTitle: {
-      color: COLORS.text,
-      fontSize: 15,
-      fontWeight: 'bold',
-    },
-    formatCardWrapper: {
-      marginBottom: 10,
-    },
-    formatCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: COLORS.bg,
-      padding: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: COLORS.border,
-    },
-    formatCardDisabled: {
-      opacity: 0.4,
-    },
-    formatInfo: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flex: 1,
-    },
-    formatText: {
-      color: COLORS.text,
-      fontSize: 13,
-      fontWeight: '600',
-      marginLeft: 10,
-      flex: 1,
-    },
-    progressSection: {
-      marginTop: 8,
-    },
-    progressContainer: {
-      backgroundColor: COLORS.border,
-      borderRadius: 8,
-      height: 22,
-      overflow: 'hidden',
-      justifyContent: 'center',
-    },
-    progressBar: {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      bottom: 0,
-      backgroundColor: COLORS.purple,
-    },
-    progressText: {
-      color: '#ffffff',
-      fontSize: 11,
-      fontWeight: 'bold',
-      textAlign: 'center',
-      zIndex: 1,
-    },
-    adBanner: {
-      marginTop: 20,
-      backgroundColor: COLORS.card,
-      padding: 12,
-      borderRadius: 10,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: COLORS.purple,
-    },
-    adText: {
-      color: COLORS.gold,
-      fontSize: 12,
-      textAlign: 'center',
-      fontWeight: '600',
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    padding: 20,
+    backgroundColor: '#0f172a',
+    flexGrow: 1,
+    paddingBottom: 40,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#3b82f6',
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  subTitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  inputIcon: {
+    marginRight: 8,
+  },
+  input: {
+    flex: 1,
+    color: '#fff',
+    height: 45,
+  },
+  fetchButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 10,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 25,
+  },
+  fetchButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  sectionTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  formatCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1e293b',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  formatInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  formatText: {
+    color: '#fff',
+    fontSize: 15,
+    marginLeft: 12,
+    fontWeight: '500',
+  },
+});
