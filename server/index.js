@@ -29,46 +29,53 @@ app.post('/download', async (req, res) => {
 
     let formatsList = [];
 
-    // কম্বাইন্ড (ভিডিও + অডিও একসাথে) ফরম্যাট ফিল্টার করা
     if (output.formats && Array.isArray(output.formats)) {
-      const combinedFormats = output.formats.filter(f => f.url && f.vcodec !== 'none' && f.acodec !== 'none');
+      // ১. যেগুলোতে ভিডিও এবং অডিও দুটোই আছে (Combined formats) অথবা ভালো ভিডিও রেজুলেশন আছে
+      const videoFormats = output.formats.filter(f => f.url && f.height && f.vcodec !== 'none');
       
-      if (combinedFormats.length > 0) {
-        formatsList = combinedFormats
-          .sort((a, b) => (b.height || 0) - (a.height || 0))
-          .slice(0, 4) // সর্বোচ্চ ৪টি ভিডিও কোয়ালিটি
-          .map((f, index) => ({
-            id: index,
-            quality: f.height ? `${f.height}p` : (f.format_note || 'HD'),
-            url: f.url,
+      // রেজুলেশন অনুযায়ী সাজানো (বড় থেকে ছোট: 1080p, 720p, 480p...)
+      const uniqueHeights = [...new Set(videoFormats.map(f => f.height))]
+        .sort((a, b) => b - a);
+
+      uniqueHeights.forEach((height, index) => {
+        const match = videoFormats.find(f => f.height === height);
+        if (match) {
+          formatsList.push({
+            id: `video_${height}_${index}`,
+            quality: `${height}p`,
+            url: match.url,
             isAudio: false,
-          }));
+          });
+        }
+      });
+
+      // ২. অডিও ফরম্যাট আলাদা করা
+      const audioFormats = output.formats.filter(f => f.url && f.vcodec === 'none' && f.acodec !== 'none');
+      if (audioFormats.length > 0) {
+        formatsList.push({
+          id: 'audio_mp3',
+          quality: 'MP3',
+          url: audioFormats[0].url,
+          isAudio: true,
+        });
       }
     }
 
+    // যদি কোনো কারণে ফরম্যাট লিস্ট খালি থাকে
     if (formatsList.length === 0 && output.url) {
       formatsList.push({
-        id: 0,
-        quality: output.resolution || '720p (HD)',
+        id: 'default_video',
+        quality: '720p',
         url: output.url,
         isAudio: false,
       });
+      formatsList.push({
+        id: 'default_audio',
+        quality: 'MP3',
+        url: output.url,
+        isAudio: true,
+      });
     }
-
-    // ১টি অডিও ফরম্যাট যোগ করা
-    let audioUrl = '';
-    if (output.formats && Array.isArray(output.formats)) {
-      const audioFormat = output.formats.find(f => f.url && f.vcodec === 'none' && f.acodec !== 'none');
-      if (audioFormat) audioUrl = audioFormat.url;
-    }
-    if (!audioUrl && output.url) audioUrl = output.url;
-
-    formatsList.push({
-      id: 'audio_1',
-      quality: 'Audio (MP3)',
-      url: audioUrl,
-      isAudio: true,
-    });
 
     res.json({
       success: true,
@@ -78,7 +85,7 @@ app.post('/download', async (req, res) => {
 
   } catch (error) {
     console.error('Download Error:', error.message);
-    res.status(500).json({ success: false, error: 'সার্ভার এই প্ল্যাটফর্ম থেকে ভিডিও প্রসেস করতে ব্যর্থ হয়েছে।' });
+    res.status(500).json({ success: false, error: 'সার্ভার এই লিংক থেকে ডাটা প্রসেস করতে ব্যর্থ হয়েছে।' });
   }
 });
 
