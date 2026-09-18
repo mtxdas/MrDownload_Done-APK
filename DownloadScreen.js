@@ -28,9 +28,8 @@ const COLORS = {
   red: '#ef4444',
 };
 
-// Render/Heroku-এর মতো ফ্রি-টায়ার সার্ভার কোল্ড-স্টার্টে বেশি সময় নিতে পারে,
-// তাই টাইমআউট বাড়িয়ে ৪৫ সেকেন্ড করা হয়েছে।
-const FETCH_TIMEOUT_MS = 45000;
+// রেন্ডার ফ্রি-টায়ার সার্ভার কোল্ড-স্টার্ট এড়াতে টাইমআউট বাড়িয়ে ৬০ সেকেন্ড করা হলো
+const FETCH_TIMEOUT_MS = 60000;
 
 export default function DownloadScreen(props) {
   const settingsContext = useSettings();
@@ -44,9 +43,6 @@ export default function DownloadScreen(props) {
   const [downloadingUrl, setDownloadingUrl] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadComplete, setDownloadComplete] = useState(false);
-  // ডাউনলোড শেষ হয়ে গ্যালারি/স্টোরেজে সেভ করার পর্যায়ে আছে কিনা —
-  // এই পর্যায়ে ক্যান্সেল বাটন লুকানো থাকবে, যাতে সেভ-চলাকালীন
-  // ক্যান্সেল করে race condition তৈরি না হয়।
   const [isSaving, setIsSaving] = useState(false);
 
   const isMounted = useRef(true);
@@ -54,6 +50,35 @@ export default function DownloadScreen(props) {
   const currentTempUri = useRef(null);
   const isCancelled = useRef(false);
   const completeTimeoutRef = useRef(null);
+
+  // অ্যাপ ওপেন হওয়ার সাথে সাথে সার্ভার ওয়ার্ম-আপ করার জন্য পিং করা
+  useEffect(() => {
+    isMounted.current = true;
+
+    const wakeUpServer = async () => {
+      try {
+        let targetUrl = adminSettings && adminSettings.apiUrl ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/';
+        if (targetUrl.endsWith('/download')) {
+          targetUrl = targetUrl.replace('/download', '');
+        }
+        await fetch(targetUrl);
+      } catch (e) {
+        // ইগ্নোর করা হলো
+      }
+    };
+    wakeUpServer();
+
+    return () => {
+      isMounted.current = false;
+      if (activeDownloadResumable.current) {
+        activeDownloadResumable.current.cancelAsync().catch(() => {});
+      }
+      if (completeTimeoutRef.current) {
+        clearTimeout(completeTimeoutRef.current);
+      }
+      cleanupTempFile();
+    };
+  }, [adminSettings, cleanupTempFile]);
 
   const cleanupTempFile = useCallback(async (fileUri) => {
     const targetUri = fileUri || currentTempUri.current;
@@ -64,30 +89,12 @@ export default function DownloadScreen(props) {
         await FileSystem.deleteAsync(targetUri, { idempotent: true });
       }
     } catch (e) {
-      // Ignore error during cleanup
     } finally {
       if (targetUri === currentTempUri.current) {
         currentTempUri.current = null;
       }
     }
   }, []);
-
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-      if (activeDownloadResumable.current) {
-        // cancelAsync() একটি Promise রিটার্ন করে — এখানে await করা যাবে না
-        // (cleanup ফাংশন sync), তাই .catch() দিয়ে rejection ধরে
-        // unhandled-promise-rejection warning এড়ানো হলো।
-        activeDownloadResumable.current.cancelAsync().catch(() => {});
-      }
-      if (completeTimeoutRef.current) {
-        clearTimeout(completeTimeoutRef.current);
-      }
-      cleanupTempFile();
-    };
-  }, [cleanupTempFile]);
 
   const sanitizeUrl = useCallback((inputUrl) => {
     if (!inputUrl) return '';
@@ -124,21 +131,17 @@ export default function DownloadScreen(props) {
     return isAudio ? 'mp3' : 'mp4';
   }, []);
 
-  // ইউনিকোড প্রপার্টি এসকেপ (\p{L}, \p{N}) পুরনো Hermes ইঞ্জিনে
-  // সাপোর্টেড না-ও থাকতে পারে, তাই try/catch দিয়ে সেফ ASCII fallback রাখা হলো।
   const sanitizeFileName = useCallback((rawName) => {
     let cleaned = rawName;
     try {
       cleaned = rawName.replace(/[^\p{L}\p{N}_\- ]/gu, '_');
     } catch (e) {
-      // Unicode property escape সাপোর্ট না থাকলে বেসিক ASCII-only ক্লিনআপ
       cleaned = rawName.replace(/[^a-zA-Z0-9_\- ]/g, '_');
     }
     cleaned = cleaned.trim().replace(/\s+/g, '_').substring(0, 25);
     return cleaned || 'Media_File';
   }, []);
 
-  // ১. টাইমআউট (৪৫ সেকেন্ড) এবং স্পষ্ট এরর মেসেজ সহ ফেচ ফাংশন
   const handleFetchMedia = useCallback(async () => {
     const cleanUrl = sanitizeUrl(url);
     if (!cleanUrl) {
@@ -184,10 +187,6 @@ export default function DownloadScreen(props) {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        // সার্ভার 200 OK দিয়েও HTML/প্লেইন-টেক্সট (যেমন প্রক্সি এরর পেজ)
-        // রিটার্ন করতে পারে — response.json() তখন থ্রো করবে, তাই এটা
-        // আলাদাভাবে try/catch করে স্পষ্ট মেসেজ দেওয়া হলো (নেটওয়ার্ক এরর
-        // হিসেবে ভুলভাবে দেখানো এড়াতে)।
         let data = null;
         try {
           data = await response.json();
@@ -216,8 +215,6 @@ export default function DownloadScreen(props) {
                 skippedCount += 1;
               }
             });
-            // সব ফরম্যাটেই url মিসিং থাকলে ইউজারকে জেনেরিক মেসেজের বদলে
-            // আসল কারণ জানানো দরকার।
             if (parsedFormats.length === 0) {
               errorMessage = 'পাওয়া ফরম্যাটগুলোর কোনোটিতেই সঠিক ডাউনলোড লিংক পাওয়া যায়নি।';
             }
@@ -228,13 +225,12 @@ export default function DownloadScreen(props) {
           errorMessage = String(data.error);
         }
       } else {
-        // সার্ভার নন-2xx রেসপন্স দিলে স্ট্যাটাস কোড সহ স্পষ্ট মেসেজ
         errorMessage = `সার্ভার এরর (কোড: ${response.status})। কিছুক্ষণ পর আবার চেষ্টা করুন।`;
       }
     } catch (err) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
-        errorMessage = 'সার্ভার থেকে রেসপন্স পেতে দেরি হচ্ছে (টাইমআউট)। কিছুক্ষণ পর পুনরায় চেষ্টা করুন।';
+        errorMessage = 'সার্ভার থেকে রেসপন্স পেতে দেরি হচ্ছে (টাইমআউট)। রেন্ডার সার্ভার সজাগ হতে একটু সময় নিতে পারে, দয়া করে আবার চেষ্টা করুন।';
       } else {
         errorMessage = 'নেটওয়ার্ক সমস্যা হয়েছে। ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন।';
       }
@@ -277,7 +273,6 @@ export default function DownloadScreen(props) {
     }
   }, [cleanupTempFile]);
 
-  // ২. পারমিশন হ্যান্ডলিং
   const requestMediaPermissions = useCallback(async () => {
     try {
       const { status: existingStatus, canAskAgain } = await MediaLibrary.getPermissionsAsync();
@@ -308,17 +303,10 @@ export default function DownloadScreen(props) {
     const isAudio = itemObj.isAudio;
     const downloadKey = itemObj.id || (fileUrl + quality);
 
-    // এই নির্দিষ্ট ডাউনলোডের জন্য একটি লোকাল ক্যান্সেল-টোকেন, যাতে
-    // আগের ডাউনলোডের isCancelled ফ্ল্যাগ পরবর্তী ডাউনলোডকে প্রভাবিত না করে।
-    let localCancelled = false;
-    // ডাউনলোড সফলভাবে শেষ হয়েছে কিনা তার ট্র্যাক — finally ব্লকে
-    // UI ক্লিয়ার করার সিদ্ধান্ত নিতে ব্যবহার হবে (এরর/exception হলেও যেন আটকে না থাকে)।
     let succeeded = false;
     isCancelled.current = false;
 
     try {
-      // MediaLibrary গ্যালারি মূলত ছবি/ভিডিওর জন্য — অডিও ফাইল গ্যালারিতে
-      // যায় না, তাই সেক্ষেত্রে গ্যালারি পারমিশনের প্রয়োজন নেই।
       if (!isAudio) {
         const hasPermission = await requestMediaPermissions();
         if (!hasPermission) return;
@@ -339,7 +327,6 @@ export default function DownloadScreen(props) {
       const tempLocalUri = `${FileSystem.cacheDirectory}${filename}`;
       currentTempUri.current = tempLocalUri;
 
-      // থ্রটলড প্রোগ্রেস আপডেট (অপ্রয়োজনীয় রি-রেন্ডার কমাবে)
       let lastProgress = 0;
       const callback = (downloadProgressData) => {
         if (!isMounted.current || isCancelled.current) return;
@@ -366,32 +353,19 @@ export default function DownloadScreen(props) {
 
       const downloadResult = await activeDownloadResumable.current.downloadAsync();
 
-      // ডাউনলোড নেটওয়ার্ক-পর্যায়ে ক্যান্সেল হয়েছিল কিনা এখানেই চেক করা হচ্ছে।
-      // এর পরে আর isCancelled.current চেক করা হবে না — কারণ ফাইল এখন
-      // ডিস্কে লেখা শেষ, এবং সেভ-পর্যায়ে ক্যান্সেল করাটা অর্থহীন এবং
-      // ভুল "ব্যর্থ" স্টেট তৈরি করে (ফাইল আসলে সেভ হয়ে যাওয়া সত্ত্বেও)।
       if (isCancelled.current || !downloadResult || !downloadResult.uri) {
-        localCancelled = true;
         return;
       }
 
-      // সেভ-পর্যায়ে প্রবেশ — cancelDownload বাটন এখন থেকে লুকানো থাকবে,
-      // যাতে সেভ চলাকালীন ক্যান্সেল চাপলে race condition তৈরি না হয়।
       if (isMounted.current) {
         setIsSaving(true);
       }
 
       if (isAudio) {
-        // MediaLibrary অডিও অ্যাসেট সাপোর্ট করে না (মূলত ছবি/ভিডিওর জন্য
-        // তৈরি), তাই অডিও ফাইল গ্যালারির বদলে অ্যাপের নিজস্ব ডকুমেন্ট
-        // ফোল্ডারে স্থায়ীভাবে সেভ করা হচ্ছে।
         const persistentUri = `${FileSystem.documentDirectory}${filename}`;
         await FileSystem.moveAsync({ from: downloadResult.uri, to: persistentUri });
-        // moveAsync ইতিমধ্যে ফাইলটা cache থেকে সরিয়ে নিয়েছে, তাই আলাদা
-        // করে cleanupTempFile কল করার দরকার নেই।
         currentTempUri.current = null;
       } else {
-        // গ্যালারিতে সেভ করা (ছবি/ভিডিও)
         if (Platform.OS === 'android') {
           await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
         } else {
@@ -409,7 +383,6 @@ export default function DownloadScreen(props) {
       succeeded = true;
 
       if (isMounted.current) {
-        // ১০০% দেখানোর জন্য সংক্ষিপ্ত বিরতি — এরপর UI ক্লিয়ার হবে
         setDownloadProgress(100);
         setDownloadComplete(true);
         Alert.alert(
@@ -449,11 +422,6 @@ export default function DownloadScreen(props) {
     } finally {
       activeDownloadResumable.current = null;
       await cleanupTempFile();
-      // সফলভাবে শেষ হওয়া ডাউনলোডের ক্ষেত্রে ১০০% স্টেট কিছুক্ষণ দেখানোর জন্য
-      // এখানে downloadingUrl রিসেট করা হচ্ছে না (উপরের setTimeout তা করবে)।
-      // অন্য যেকোনো ক্ষেত্রে — ক্যান্সেল, নেটওয়ার্ক এরর, পারমিশন ব্যর্থতা,
-      // বা যেকোনো exception — succeeded false থাকবে, তাই UI এখানেই রিসেট হবে
-      // এবং প্রোগ্রেস বার/বাটন স্ক্রিনে আটকে থাকবে না।
       if (isMounted.current && !succeeded) {
         setDownloadingUrl(null);
         setDownloadProgress(0);
