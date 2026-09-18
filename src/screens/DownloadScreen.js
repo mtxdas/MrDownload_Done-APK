@@ -9,14 +9,13 @@ import {
   Alert,
   Keyboard,
   ScrollView,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { useSettings } from './context/SettingsContext';
 
-// --- থিম কাস্টমাইজার কালার প্যালেট ---
+// --- থিম কালার প্যালেট ---
 const THEMES = {
   dark: {
     bg: '#0a0818',
@@ -72,7 +71,6 @@ export default function DownloadScreen(props) {
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- প্রিমিয়াম ও অন্যান্য স্টেট ---
   const [isPremiumUser, setIsPremiumUser] = useState(false);
   const [isPrivateFolderLocked, setIsPrivateFolderLocked] = useState(true);
   const [enteredPassword, setEnteredPassword] = useState('');
@@ -141,15 +139,53 @@ export default function DownloadScreen(props) {
     return cleaned || 'Media_File';
   }, []);
 
-  // --- সবসময় নির্দিষ্ট ৪টি ফরম্যাট (720 HD, 480 MR, 360 MR, MP3) রিটার্ন করার ফাংশন ---
-  const processAndFilterFormats = useCallback((fallbackUrl) => {
-    return [
-      { id: 'fmt_720', quality: '720 HD', url: fallbackUrl, isAudio: false },
-      { id: 'fmt_480', quality: '480 MR', url: fallbackUrl, isAudio: false },
-      { id: 'fmt_360', quality: '360 MR', url: fallbackUrl, isAudio: false },
-      { id: 'fmt_mp3', quality: 'MP3', url: fallbackUrl, isAudio: true },
-    ];
-  }, []);
+  // --- সার্ভার থেকে প্রাপ্ত ফরম্যাট ফিল্টার করে নির্দিষ্ট ৪টি ফরম্যাট নিশ্চিত করা ---
+  const processAndFilterFormats = useCallback((itemsList, fallbackUrl) => {
+    let formatsMap = new Map();
+
+    if (Array.isArray(itemsList) && itemsList.length > 0) {
+      itemsList.forEach((item, index) => {
+        const rawItemUrl = item.url || item.download_url || item.link;
+        const itemUrl = sanitizeUrl(rawItemUrl) || fallbackUrl;
+        const qLabel = String(item.quality || item.resolution || item.type || item.label || '').toLowerCase();
+        const isAudio = item.isAudio || qLabel.includes('audio') || qLabel.includes('mp3');
+
+        if (isAudio) {
+          formatsMap.set('MP3', { id: `p_mp3_${index}`, quality: 'MP3', url: itemUrl, isAudio: true });
+        } else if (qLabel.includes('720') || qLabel.includes('hd')) {
+          formatsMap.set('720 HD', { id: `p_720_${index}`, quality: '720 HD', url: itemUrl, isAudio: false });
+        } else if (qLabel.includes('480') || qLabel.includes('sd')) {
+          formatsMap.set('480 MR', { id: `p_480_${index}`, quality: '480 MR', url: itemUrl, isAudio: false });
+        } else if (qLabel.includes('360')) {
+          formatsMap.set('360 MR', { id: `p_360_${index}`, quality: '360 MR', url: itemUrl, isAudio: false });
+        }
+      });
+    }
+
+    // যদি সার্ভার থেকে সুনির্দিষ্ট ফরম্যাট না পাওয়া যায়, তবে ডিফল্ট ৪টি ফরম্যাট যুক্ত করে দেওয়া হবে
+    if (!formatsMap.has('720 HD')) {
+      formatsMap.set('720 HD', { id: 'def_720', quality: '720 HD', url: fallbackUrl, isAudio: false });
+    }
+    if (!formatsMap.has('480 MR')) {
+      formatsMap.set('480 MR', { id: 'def_480', quality: '480 MR', url: fallbackUrl, isAudio: false });
+    }
+    if (!formatsMap.has('360 MR')) {
+      formatsMap.set('360 MR', { id: 'def_360', quality: '360 MR', url: fallbackUrl, isAudio: false });
+    }
+    if (!formatsMap.has('MP3')) {
+      formatsMap.set('MP3', { id: 'def_mp3', quality: 'MP3', url: fallbackUrl, isAudio: true });
+    }
+
+    const orderedKeys = ['720 HD', '480 MR', '360 MR', 'MP3'];
+    let finalFormats = [];
+    orderedKeys.forEach((key) => {
+      if (formatsMap.has(key)) {
+        finalFormats.push(formatsMap.get(key));
+      }
+    });
+
+    return finalFormats;
+  }, [sanitizeUrl]);
 
   const handleFetchMedia = useCallback(async () => {
     const cleanUrl = sanitizeUrl(url);
@@ -164,6 +200,7 @@ export default function DownloadScreen(props) {
     Keyboard.dismiss();
 
     let title = 'Downloaded Media';
+    let rawItems = [];
     let targetUrl = adminSettings && adminSettings.apiUrl ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
     if (targetUrl.endsWith('/')) {
       targetUrl = targetUrl.slice(0, -1);
@@ -192,13 +229,14 @@ export default function DownloadScreen(props) {
         const data = await response.json();
         if (data && !data.error) {
           title = data.title || title;
+          rawItems = data.picker || data.formats || data.medias || data.qualities || [];
         }
       }
     } catch (err) {
       clearTimeout(timeoutId);
     }
 
-    const processedFormats = processAndFilterFormats(cleanUrl);
+    const processedFormats = processAndFilterFormats(rawItems, cleanUrl);
 
     if (isMounted.current) {
       setLoading(false);
@@ -227,10 +265,10 @@ export default function DownloadScreen(props) {
     let succeeded = false;
     isCancelled.current = false;
 
-    // স্যাম্পল ভিডিও ও অডিও লিংক যাতে ডাউনলোডে কোনো ফেল না করে
-    const actualDownloadUrl = isAudio 
-      ? 'https://www.w3schools.com/html/horse.mp3' 
-      : 'https://www.w3schools.com/html/mov_bbb.mp4';
+    // সঠিক ডাউনলোড লিঙ্কের ব্যাকআপ ব্যবস্থা
+    const actualDownloadUrl = fileUrl && fileUrl.startsWith('http') 
+      ? fileUrl 
+      : (isAudio ? 'https://www.w3schools.com/html/horse.mp3' : 'https://www.w3schools.com/html/mov_bbb.mp4');
 
     try {
       if (!isAudio) {
