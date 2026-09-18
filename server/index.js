@@ -20,7 +20,11 @@ app.post('/download', async (req, res) => {
       noCheckCertificates: true,
       noWarnings: true,
       preferFreeFormats: true,
-      addHeader: ['User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'],
+      geoBypass: true,
+      addHeader: [
+        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept-Language: en-US,en;q=0.9',
+      ],
     });
 
     let formatsList = [];
@@ -32,7 +36,7 @@ app.post('/download', async (req, res) => {
       if (combinedFormats.length > 0) {
         formatsList = combinedFormats
           .sort((a, b) => (b.height || 0) - (a.height || 0))
-          .slice(0, 3) // সর্বোচ্চ ৩টি ভিডিও কোয়ালিটি
+          .slice(0, 4) // সর্বোচ্চ ৪টি ভিডিও কোয়ালিটি
           .map((f, index) => ({
             id: index,
             quality: f.height ? `${f.height}p` : (f.format_note || 'HD'),
@@ -74,7 +78,7 @@ app.post('/download', async (req, res) => {
 
   } catch (error) {
     console.error('Download Error:', error.message);
-    res.status(500).json({ success: false, error: 'সার্ভার ভিডিও প্রসেস করতে ব্যর্থ হয়েছে।' });
+    res.status(500).json({ success: false, error: 'সার্ভার এই প্ল্যাটফর্ম থেকে ভিডিও প্রসেস করতে ব্যর্থ হয়েছে।' });
   }
 });
 
