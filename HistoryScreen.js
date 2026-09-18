@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
 
 const COLORS = {
   bg: '#0a0818',
@@ -28,33 +27,6 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [currentEditingItem, setCurrentEditingItem] = useState(null);
   const [newTitleText, setNewTitleText] = useState('');
-
-  // অডিও প্লেব্যাক স্টেট
-  const [sound, setSound] = useState(null);
-  const [playingId, setPlayingId] = useState(null);
-
-  // ব্যাকগ্রাউন্ডে অডিও প্লে করার জন্য অডিও সেশন কনফিগার করা
-  useEffect(() => {
-    const setupAudioMode = async () => {
-      try {
-        await Audio.setAudioModeAsync({
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-      } catch (e) {
-        console.log('Audio mode setup error:', e);
-      }
-    };
-    setupAudioMode();
-
-    return () => {
-      if (sound) {
-        sound.unloadAsync();
-      }
-    };
-  }, [sound]);
 
   const getPlatformIcon = (platform) => {
     switch (platform) {
@@ -75,52 +47,11 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
     }
   };
 
-  // অডিও প্লে বা পজ করার ফাংশন (ব্যাকগ্রাউন্ড সাপোর্টসহ)
-  const handleTogglePlayAudio = async (item) => {
-    try {
-      if (playingId === item.id && sound) {
-        // যদি ইতিমধ্যে এটাই প্লে হতে থাকে, তবে স্টপ বা পজ হবে
-        const status = await sound.getStatusAsync();
-        if (status.isPlaying) {
-          await sound.pauseAsync();
-          setPlayingId(null);
-        } else {
-          await sound.playAsync();
-          setPlayingId(item.id);
-        }
-        return;
-      }
-
-      // অন্য কোনো গান চললে তা বন্ধ করে দেওয়া
-      if (sound) {
-        await sound.unloadAsync();
-        setSound(null);
-      }
-
-      // যদি আইটেমের কোনো ফাইল বা অডিও ইউআরএল থাকে
-      if (item.url || item.fileUri) {
-        const audioUri = item.fileUri || item.url;
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: audioUri },
-          { shouldPlay: true }
-        );
-        setSound(newSound);
-        setPlayingId(item.id);
-
-        newSound.setOnPlaybackStatusUpdate((status) => {
-          if (status.didJustFinish) {
-            setPlayingId(null);
-          }
-        });
-      } else {
-        if (onPlay) {
-          onPlay(item);
-        } else {
-          Alert.alert('Play', `Playing: ${item.title}`);
-        }
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Could not play audio file in background.');
+  const handlePlay = (item) => {
+    if (onPlay) {
+      onPlay(item);
+    } else {
+      Alert.alert('Play', `Playing: ${item.title}`);
     }
   };
 
@@ -142,67 +73,54 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
     setCurrentEditingItem(null);
   };
 
-  const renderItem = ({ item }) => {
-    const isThisPlaying = playingId === item.id;
-
-    return (
-      <View style={styles.card}>
-        <View style={styles.cardTopRow}>
-          <View style={styles.iconBox}>
-            {getPlatformIcon(item.platform)}
-          </View>
-          
-          <View style={styles.info}>
-            <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-            <Text style={styles.meta}>{item.quality} • {item.size || 'Auto'} • {item.time || 'Recently'}</Text>
-          </View>
-
-          <View style={styles.statusBox}>
-            <View style={styles.doneBadge}>
-              <Ionicons name="checkmark" size={12} color="#fff" />
-              <Text style={styles.doneText}>DONE</Text>
-            </View>
-          </View>
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <View style={styles.cardTopRow}>
+        <View style={styles.iconBox}>
+          {getPlatformIcon(item.platform)}
+        </View>
+        
+        <View style={styles.info}>
+          <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.meta}>{item.quality} • {item.size || 'Auto'} • {item.time || 'Recently'}</Text>
         </View>
 
-        {/* অ্যাকশন বাটনসমূহ: Play, Rename, Delete */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity 
-            style={styles.actionBtn} 
-            onPress={() => handleTogglePlayAudio(item)}
-          >
-            <Ionicons name={isThisPlaying ? 'pause' : 'play'} size={14} color={COLORS.green} />
-            <Text style={[styles.actionText, { color: COLORS.green }]}>
-              {isThisPlaying ? 'Pause' : 'Play'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.actionBtn} 
-            onPress={() => handleOpenRename(item)}
-          >
-            <Ionicons name="create-outline" size={14} color={COLORS.gold} />
-            <Text style={[styles.actionText, { color: COLORS.gold }]}>Rename</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.actionBtn} 
-            onPress={() => {
-              if (playingId === item.id && sound) {
-                sound.unloadAsync();
-                setSound(null);
-                setPlayingId(null);
-              }
-              onRemove(item.id);
-            }}
-          >
-            <Ionicons name="trash-outline" size={14} color={COLORS.red} />
-            <Text style={[styles.actionText, { color: COLORS.red }]}>Delete</Text>
-          </TouchableOpacity>
+        <View style={styles.statusBox}>
+          <View style={styles.doneBadge}>
+            <Ionicons name="checkmark" size={12} color="#fff" />
+            <Text style={styles.doneText}>DONE</Text>
+          </View>
         </View>
       </View>
-    );
-  };
+
+      {/* অ্যাকশন বাটনসমূহ: Play, Rename, Delete */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity 
+          style={styles.actionBtn} 
+          onPress={() => handlePlay(item)}
+        >
+          <Ionicons name="play" size={14} color={COLORS.green} />
+          <Text style={[styles.actionText, { color: COLORS.green }]}>Play</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.actionBtn} 
+          onPress={() => handleOpenRename(item)}
+        >
+          <Ionicons name="create-outline" size={14} color={COLORS.gold} />
+          <Text style={[styles.actionText, { color: COLORS.gold }]}>Rename</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.actionBtn} 
+          onPress={() => onRemove(item.id)}
+        >
+          <Ionicons name="trash-outline" size={14} color={COLORS.red} />
+          <Text style={[styles.actionText, { color: COLORS.red }]}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
