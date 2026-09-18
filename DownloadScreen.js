@@ -43,13 +43,14 @@ const THEMES = {
     gold: '#38bdf8',
   },
   emerald: {
-    bg: '#022c22',
-    card: '#064e3b',
-    border: '#065f46',
-    purple: '#059669',
+    // পরিবর্তিত হলুদ থিম (Yellow 50% + Red 50%)
+    bg: '#1a180c',
+    card: '#2c2813',
+    border: '#4a411a',
+    purple: '#eab308',
     text: '#ffffff',
-    muted: '#6ee7b7',
-    green: '#34d399',
+    muted: '#a1a1aa',
+    green: '#eab308',
     red: '#ef4444',
     gold: '#fbbf24',
   },
@@ -569,7 +570,7 @@ export default function DownloadScreen(props) {
             style={[dynamicStyles.themeBtn, currentThemeKey === 'emerald' && dynamicStyles.activeThemeBtn]} 
             onPress={() => setCurrentThemeKey('emerald')}
           >
-            <Text style={dynamicStyles.themeBtnText}>Emerald</Text>
+            <Text style={dynamicStyles.themeBtnText}>Yellow</Text>
           </TouchableOpacity>
         </View>
 
