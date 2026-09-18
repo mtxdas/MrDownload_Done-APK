@@ -43,7 +43,6 @@ const THEMES = {
     gold: '#38bdf8',
   },
   emerald: {
-    // পরিবর্তিত হলুদ থিম (Yellow 50% + Red 50%)
     bg: '#1a180c',
     card: '#2c2813',
     border: '#4a411a',
@@ -75,20 +74,14 @@ export default function DownloadScreen(props) {
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- প্রিমিয়াম ও নতুন ফিচার স্টেটসমূহ ---
+  // --- প্রিমিয়াম ও অন্যান্য স্টেট ---
   const [isPremiumUser, setIsPremiumUser] = useState(false);
-  const [selectedBatchItems, setSelectedBatchItems] = useState([]);
   const [isPrivateFolderLocked, setIsPrivateFolderLocked] = useState(true);
-  const [privatePassword, setPrivatePassword] = useState('');
   const [enteredPassword, setEnteredPassword] = useState('');
 
-  // ফিউচার ১: মিনি অডিও প্লেয়ার স্টেট
   const [miniPlayerActive, setMiniPlayerActive] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [currentAudioName, setCurrentAudioName] = useState('');
-
-  // ফিউচার ৪: শেয়ার শিট লিংক স্টোরেজ
-  const [sharedIncomingUrl, setSharedIncomingUrl] = useState('');
 
   const isMounted = useRef(true);
   const activeDownloadResumable = useRef(null);
@@ -114,54 +107,8 @@ export default function DownloadScreen(props) {
 
   useEffect(() => {
     isMounted.current = true;
-
-    const checkClipboardAndShare = async () => {
-      try {
-        const clipboardContent = await Clipboard.getStringAsync();
-        if (clipboardContent && (clipboardContent.startsWith('http://') || clipboardContent.startsWith('https://'))) {
-          if (
-            clipboardContent.includes('youtube.com') ||
-            clipboardContent.includes('youtu.be') ||
-            clipboardContent.includes('tiktok.com') ||
-            clipboardContent.includes('instagram.com') ||
-            clipboardContent.includes('facebook.com')
-          ) {
-            setUrl(clipboardContent);
-          }
-        }
-
-        const initialUrl = await Linking.getInitialURL();
-        if (initialUrl) {
-          setSharedIncomingUrl(initialUrl);
-          setUrl(initialUrl);
-        }
-      } catch (e) {}
-    };
-
-    checkClipboardAndShare();
-
-    const handleDeepLink = (event) => {
-      if (event.url) {
-        setUrl(event.url);
-      }
-    };
-
-    const linkingSubscription = Linking.addEventListener('url', handleDeepLink);
-
-    const wakeUpServer = async () => {
-      try {
-        let targetUrl = adminSettings && adminSettings.apiUrl ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/';
-        if (targetUrl.endsWith('/download')) {
-          targetUrl = targetUrl.replace('/download', '');
-        }
-        await fetch(targetUrl);
-      } catch (e) {}
-    };
-    wakeUpServer();
-
     return () => {
       isMounted.current = false;
-      linkingSubscription.remove();
       if (activeDownloadResumable.current) {
         activeDownloadResumable.current.cancelAsync().catch(() => {});
       }
@@ -170,7 +117,7 @@ export default function DownloadScreen(props) {
       }
       cleanupTempFile();
     };
-  }, [adminSettings, cleanupTempFile]);
+  }, [cleanupTempFile]);
 
   const sanitizeUrl = useCallback((inputUrl) => {
     if (!inputUrl) return '';
@@ -181,25 +128,13 @@ export default function DownloadScreen(props) {
     return clean;
   }, []);
 
-  const detectPlatform = useCallback((link) => {
-    if (!link) return 'video';
-    const l = String(link).toLowerCase();
-    if (l.includes('youtube.com') || l.includes('youtu.be')) return 'youtube';
-    if (l.includes('tiktok.com')) return 'tiktok';
-    if (l.includes('instagram.com')) return 'instagram';
-    if (l.includes('facebook.com') || l.includes('fb.watch')) return 'facebook';
-    if (l.includes('twitter.com') || l.includes('x.com')) return 'twitter';
-    if (l.includes('vimeo.com')) return 'vimeo';
-    return 'video';
-  }, []);
-
   const getFileExtension = useCallback((fileUrl, isAudio) => {
     try {
       const urlWithoutQuery = fileUrl.split('?')[0].split('#')[0];
       const matchedExt = urlWithoutQuery.match(/\.([a-z0-9]+)$/i);
       if (matchedExt && matchedExt[1]) {
         const ext = matchedExt[1].toLowerCase();
-        if (['mp4', 'm4a', 'webm', 'mp3', 'mkv', 'mov', 'avi', 'flv', 'aac', 'ogg', '3gp'].includes(ext)) {
+        if (['mp4', 'm4a', 'webm', 'mp3', 'mkv', 'mov', 'avi'].includes(ext)) {
           return ext;
         }
       }
@@ -218,25 +153,70 @@ export default function DownloadScreen(props) {
     return cleaned || 'Media_File';
   }, []);
 
-  // --- ফরম্যাট লেবেল আপনার নির্দিষ্ট ফরম্যাটে রূপান্তর করার ফাংশন ---
-  const formatDisplayQuality = useCallback((qualityStr, isAudio) => {
-    if (isAudio) return 'MP3';
-    const q = String(qualityStr || '').toLowerCase();
-    
-    if (q.includes('1280') || q.includes('1080') || q.includes('fhd') || q.includes('1080p')) {
-      return '1280 FHD';
+  // --- শুধু অনুমোদিত ফরম্যাটগুলো ফিল্টার ও লেবেল করার ফাংশন ---
+  const processAndFilterFormats = useCallback((itemsList, fallbackUrl) => {
+    let formatsMap = new Map();
+
+    if (Array.isArray(itemsList) && itemsList.length > 0) {
+      itemsList.forEach((item, index) => {
+        const rawItemUrl = item.url || item.download_url || item.link;
+        const itemUrl = sanitizeUrl(rawItemUrl);
+        if (!itemUrl) return;
+
+        const qLabel = String(item.quality || item.resolution || item.type || item.label || '').toLowerCase();
+        const isAudio = item.isAudio || qLabel.includes('audio') || qLabel.includes('mp3');
+
+        if (isAudio) {
+          formatsMap.set('MP3', {
+            id: `p_mp3_${index}`,
+            quality: 'MP3',
+            url: itemUrl,
+            isAudio: true,
+          });
+        } else if (qLabel.includes('720') || qLabel.includes('hd')) {
+          formatsMap.set('720 HD', {
+            id: `p_720_${index}`,
+            quality: '720 HD',
+            url: itemUrl,
+            isAudio: false,
+          });
+        } else if (qLabel.includes('480') || qLabel.includes('sd')) {
+          formatsMap.set('480 MR', {
+            id: `p_480_${index}`,
+            quality: '480 MR',
+            url: itemUrl,
+            isAudio: false,
+          });
+        } else if (qLabel.includes('360')) {
+          formatsMap.set('360 MR', {
+            id: `p_360_${index}`,
+            quality: '360 MR',
+            url: itemUrl,
+            isAudio: false,
+          });
+        }
+      });
     }
-    if (q.includes('720') || q.includes('hd') || q.includes('720p')) {
-      return '720 HD';
+
+    // যদি সার্ভার থেকে কোনো নির্দিষ্ট ফরম্যাট না পাওয়া যায়, তবে ডিফল্ট হিসেবে এগুলো যুক্ত করে দেওয়া হবে
+    if (formatsMap.size === 0) {
+      formatsMap.set('720 HD', { id: 'def_720', quality: '720 HD', url: fallbackUrl, isAudio: false });
+      formatsMap.set('480 MR', { id: 'def_480', quality: '480 MR', url: fallbackUrl, isAudio: false });
+      formatsMap.set('360 MR', { id: 'def_360', quality: '360 MR', url: fallbackUrl, isAudio: false });
+      formatsMap.set('MP3', { id: 'def_mp3', quality: 'MP3', url: fallbackUrl, isAudio: true });
     }
-    if (q.includes('480') || q.includes('480p') || q.includes('sd')) {
-      return '480 MR';
-    }
-    if (q.includes('360') || q.includes('360p')) {
-      return '360 MR';
-    }
-    return qualityStr ? String(qualityStr) : 'Video';
-  }, []);
+
+    // সুনির্দিষ্ট ক্রমানুসারে সাজানো: 720 HD -> 480 MR -> 360 MR -> MP3
+    const orderedKeys = ['720 HD', '480 MR', '360 MR', 'MP3'];
+    let finalFormats = [];
+    orderedKeys.forEach((key) => {
+      if (formatsMap.has(key)) {
+        finalFormats.push(formatsMap.get(key));
+      }
+    });
+
+    return finalFormats;
+  }, [sanitizeUrl]);
 
   const handleFetchMedia = useCallback(async () => {
     const cleanUrl = sanitizeUrl(url);
@@ -245,17 +225,12 @@ export default function DownloadScreen(props) {
       return;
     }
 
-    const platform = detectPlatform(cleanUrl);
-
     setLoading(true);
     setDownloadFormats([]);
     setVideoTitle('');
     Keyboard.dismiss();
 
-    let parsedFormats = [];
-    let skippedCount = 0;
-    let title = `${platform.toUpperCase()} Video`;
-
+    let title = 'Downloaded Media';
     let targetUrl = adminSettings && adminSettings.apiUrl ? adminSettings.apiUrl : 'https://mrdownload-apk.onrender.com/download';
     if (targetUrl.endsWith('/')) {
       targetUrl = targetUrl.slice(0, -1);
@@ -267,7 +242,7 @@ export default function DownloadScreen(props) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    let errorMessage = null;
+    let rawItems = [];
 
     try {
       const response = await fetch(targetUrl, {
@@ -283,119 +258,32 @@ export default function DownloadScreen(props) {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        let data = null;
-        try {
-          data = await response.json();
-        } catch (parseErr) {
-          errorMessage = 'Unexpected response from server. Please try again later.';
-        }
-
+        const data = await response.json();
         if (data && !data.error) {
-          title = data.title || data.filename || title;
-          const itemsList = data.picker || data.formats || data.medias || data.qualities;
-
-          if (Array.isArray(itemsList) && itemsList.length > 0) {
-            itemsList.forEach((item, index) => {
-              const rawItemUrl = item.url || item.download_url || item.link;
-              const itemUrl = sanitizeUrl(rawItemUrl);
-              if (itemUrl) {
-                const qLabel = item.quality || item.resolution || item.type || item.label || `Option ${index + 1}`;
-                const qLower = String(qLabel).toLowerCase();
-                parsedFormats.push({
-                  id: `p_${index}_${Date.now()}`,
-                  quality: String(qLabel),
-                  url: itemUrl,
-                  isAudio: item.isAudio || qLower.includes('audio') || qLower.includes('mp3'),
-                });
-              } else {
-                skippedCount += 1;
-              }
-            });
-
-            parsedFormats.push({
-              id: `p_mp3_conv_${Date.now()}`,
-              quality: 'MP3',
-              url: parsedFormats[0]?.url || cleanUrl,
-              isAudio: true,
-            });
-
-            if (parsedFormats.length === 0) {
-              errorMessage = 'No valid download links found in the available formats.';
-            }
-          } else {
-            errorMessage = 'Server did not return any download formats.';
-          }
-        } else if (data && data.error) {
-          errorMessage = String(data.error);
+          title = data.title || title;
+          rawItems = data.picker || data.formats || data.medias || data.qualities || [];
         }
-      } else {
-        errorMessage = `Server Error (Code: ${response.status}). Please try again later.`;
       }
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        errorMessage = 'Server response timeout. The render server might be waking up, please try again.';
-      } else {
-        errorMessage = 'Network error occurred. Check your internet connection and try again.';
-      }
     }
+
+    const processedFormats = processAndFilterFormats(rawItems, cleanUrl);
 
     if (isMounted.current) {
       setLoading(false);
-      if (parsedFormats.length > 0) {
-        setDownloadFormats(parsedFormats);
-        setVideoTitle(title);
-        if (skippedCount > 0) {
-          Alert.alert(
-            'Some formats skipped',
-            `${skippedCount} formats were skipped because links were unavailable.`
-          );
-        }
-      } else {
-        Alert.alert('Failed', errorMessage || 'Could not fetch video links. Check backend and URL.');
-      }
+      setDownloadFormats(processedFormats);
+      setVideoTitle(title);
     }
-  }, [adminSettings, detectPlatform, sanitizeUrl, url]);
-
-  const cancelDownload = useCallback(async () => {
-    isCancelled.current = true;
-    try {
-      if (activeDownloadResumable.current) {
-        await activeDownloadResumable.current.cancelAsync();
-        activeDownloadResumable.current = null;
-      }
-    } catch (e) {
-    } finally {
-      await cleanupTempFile();
-      if (isMounted.current) {
-        setDownloadingUrl(null);
-        setDownloadProgress(0);
-        setDownloadComplete(false);
-        setIsSaving(false);
-      }
-      Alert.alert('Cancelled', 'Download has been cancelled.');
-    }
-  }, [cleanupTempFile]);
+  }, [adminSettings, processAndFilterFormats, sanitizeUrl, url]);
 
   const requestMediaPermissions = useCallback(async () => {
     try {
-      const { status: existingStatus, canAskAgain } = await MediaLibrary.getPermissionsAsync();
-      if (existingStatus === 'granted') return true;
+      const { status } = await MediaLibrary.getPermissionsAsync();
+      if (status === 'granted') return true;
 
       const { status: newStatus } = await MediaLibrary.requestPermissionsAsync(true);
-      if (newStatus === 'granted') return true;
-
-      if (!canAskAgain) {
-        Alert.alert(
-          'Permission Required',
-          'Please allow storage permissions in settings to save videos to your gallery.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Settings', onPress: () => Linking.openSettings() },
-          ]
-        );
-      }
-      return false;
+      return newStatus === 'granted';
     } catch (e) {
       return false;
     }
@@ -403,9 +291,8 @@ export default function DownloadScreen(props) {
 
   const startInAppDownload = useCallback(async (itemObj) => {
     const fileUrl = sanitizeUrl(itemObj.url);
-    const quality = itemObj.quality;
     const isAudio = itemObj.isAudio;
-    const downloadKey = itemObj.id || (fileUrl + quality);
+    const downloadKey = itemObj.id || fileUrl;
 
     let succeeded = false;
     isCancelled.current = false;
@@ -413,7 +300,10 @@ export default function DownloadScreen(props) {
     try {
       if (!isAudio) {
         const hasPermission = await requestMediaPermissions();
-        if (!hasPermission) return;
+        if (!hasPermission) {
+          Alert.alert('Permission Error', 'Storage permission is required to save files.');
+          return;
+        }
       }
 
       if (isMounted.current) {
@@ -425,9 +315,7 @@ export default function DownloadScreen(props) {
 
       const ext = getFileExtension(fileUrl, isAudio);
       const cleanTitle = sanitizeFileName(videoTitle || 'Media_File');
-
-      const randomId = Math.random().toString(36).substring(2, 6);
-      const filename = `${cleanTitle}_${Date.now()}_${randomId}.${ext}`;
+      const filename = `${cleanTitle}_${Date.now()}.${ext}`;
       const tempLocalUri = `${FileSystem.cacheDirectory}${filename}`;
       currentTempUri.current = tempLocalUri;
 
@@ -494,7 +382,7 @@ export default function DownloadScreen(props) {
         Alert.alert(
           'Success!',
           isAudio
-            ? 'Audio file saved and loaded into mini player successfully.'
+            ? 'Audio file saved successfully.'
             : 'Video saved successfully to the "MrDownload" gallery folder.'
         );
 
@@ -512,7 +400,7 @@ export default function DownloadScreen(props) {
       }
     } catch (err) {
       if (!isCancelled.current) {
-        Alert.alert('Download Failed', 'Could not complete the download. Check your network.');
+        Alert.alert('Download Failed', 'Could not complete the download. Please try another format.');
       }
     } finally {
       activeDownloadResumable.current = null;
@@ -527,22 +415,6 @@ export default function DownloadScreen(props) {
     }
   }, [cleanupTempFile, getFileExtension, requestMediaPermissions, sanitizeFileName, sanitizeUrl, videoTitle]);
 
-  const handleBatchDownload = useCallback(async () => {
-    if (!isPremiumUser) {
-      Alert.alert('Premium Feature', 'Batch downloading requires a premium subscription.');
-      return;
-    }
-    if (selectedBatchItems.length === 0) {
-      Alert.alert('Warning', 'No formats selected for batch download.');
-      return;
-    }
-    Alert.alert('Starting', `Starting batch download for ${selectedBatchItems.length} files...`);
-    for (const item of selectedBatchItems) {
-      await startInAppDownload(item);
-    }
-    setSelectedBatchItems([]);
-  }, [isPremiumUser, selectedBatchItems, startInAppDownload]);
-
   const dynamicStyles = getStyles(COLORS);
 
   return (
@@ -555,12 +427,6 @@ export default function DownloadScreen(props) {
 
         <View style={dynamicStyles.themeSelectorRow}>
           <TouchableOpacity 
-            style={[dynamicStyles.themeBtn, currentThemeKey === 'dark' && dynamicStyles.activeThemeBtn]} 
-            onPress={() => setCurrentThemeKey('dark')}
-          >
-            <Text style={dynamicStyles.themeBtnText}>Dark</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
             style={[dynamicStyles.themeBtn, currentThemeKey === 'ocean' && dynamicStyles.activeThemeBtn]} 
             onPress={() => setCurrentThemeKey('ocean')}
           >
@@ -570,7 +436,13 @@ export default function DownloadScreen(props) {
             style={[dynamicStyles.themeBtn, currentThemeKey === 'emerald' && dynamicStyles.activeThemeBtn]} 
             onPress={() => setCurrentThemeKey('emerald')}
           >
-            <Text style={dynamicStyles.themeBtnText}>Yellow</Text>
+            <Text style={dynamicStyles.themeBtnText}>Emerald</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[dynamicStyles.themeBtn, currentThemeKey === 'dark' && dynamicStyles.activeThemeBtn]} 
+            onPress={() => setCurrentThemeKey('dark')}
+          >
+            <Text style={dynamicStyles.themeBtnText}>Dark</Text>
           </TouchableOpacity>
         </View>
 
@@ -618,7 +490,7 @@ export default function DownloadScreen(props) {
             <TouchableOpacity 
               style={dynamicStyles.unlockBtn}
               onPress={() => {
-                if (enteredPassword === (privatePassword || '1234')) {
+                if (enteredPassword === '1234') {
                   setIsPrivateFolderLocked(false);
                   Alert.alert('Success', 'Private folder unlocked successfully.');
                 } else {
@@ -690,21 +562,12 @@ export default function DownloadScreen(props) {
         <View style={dynamicStyles.formatContainer}>
           <View style={dynamicStyles.formatHeaderRow}>
             <Text style={dynamicStyles.formatTitle}>Select Download Format:</Text>
-            {isPremiumUser && (
-              <TouchableOpacity style={dynamicStyles.batchDownloadBtn} onPress={handleBatchDownload}>
-                <Text style={dynamicStyles.batchBtnText}>Batch Download</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           {downloadFormats.map((item, index) => {
-            const downloadKey = item.id || (item.url + item.quality);
+            const downloadKey = item.id || item.url;
             const isThisDownloading = downloadingUrl === downloadKey;
             const isAnyDownloading = Boolean(downloadingUrl);
-            const isSelectedForBatch = selectedBatchItems.some((i) => i.id === item.id);
-            
-            // নির্দিষ্ট ফরম্যাটে লেবেল তৈরি কল করা
-            const formattedLabel = formatDisplayQuality(item.quality, item.isAudio);
 
             return (
               <View key={item.id || index} style={dynamicStyles.formatCardWrapper}>
@@ -722,24 +585,10 @@ export default function DownloadScreen(props) {
                       size={22}
                       color={item.isAudio ? COLORS.purple : COLORS.green}
                     />
-                    <Text style={dynamicStyles.formatText}>{formattedLabel}</Text>
+                    <Text style={dynamicStyles.formatText}>{item.quality}</Text>
                   </View>
 
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {isPremiumUser && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          if (isSelectedForBatch) {
-                            setSelectedBatchItems(selectedBatchItems.filter((i) => i.id !== item.id));
-                          } else {
-                            setSelectedBatchItems([...selectedBatchItems, item]);
-                          }
-                        }}
-                        style={[dynamicStyles.checkbox, isSelectedForBatch && dynamicStyles.checkboxSelected]}
-                      >
-                        {isSelectedForBatch && <Ionicons name="checkmark" size={14} color="#fff" />}
-                      </TouchableOpacity>
-                    )}
                     <Ionicons name="arrow-down-circle" size={24} color={COLORS.purple} style={{ marginLeft: 8 }} />
                   </View>
                 </TouchableOpacity>
@@ -756,11 +605,6 @@ export default function DownloadScreen(props) {
                           : `Downloading: ${downloadProgress}%`}
                       </Text>
                     </View>
-                    {!downloadComplete && !isSaving ? (
-                      <TouchableOpacity style={dynamicStyles.cancelBtn} onPress={cancelDownload}>
-                        <Text style={dynamicStyles.cancelBtnText}>Cancel</Text>
-                      </TouchableOpacity>
-                    ) : null}
                   </View>
                 ) : null}
               </View>
@@ -984,17 +828,6 @@ const getStyles = (COLORS) =>
       fontSize: 15,
       fontWeight: 'bold',
     },
-    batchDownloadBtn: {
-      backgroundColor: COLORS.green,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 6,
-    },
-    batchBtnText: {
-      color: '#fff',
-      fontSize: 10,
-      fontWeight: 'bold',
-    },
     formatCardWrapper: {
       marginBottom: 10,
     },
@@ -1023,26 +856,10 @@ const getStyles = (COLORS) =>
       marginLeft: 10,
       flex: 1,
     },
-    checkbox: {
-      width: 20,
-      height: 20,
-      borderRadius: 4,
-      borderWidth: 1,
-      borderColor: COLORS.muted,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    checkboxSelected: {
-      backgroundColor: COLORS.purple,
-      borderColor: COLORS.purple,
-    },
     progressSection: {
       marginTop: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
     },
     progressContainer: {
-      flex: 1,
       backgroundColor: COLORS.border,
       borderRadius: 8,
       height: 22,
@@ -1062,18 +879,6 @@ const getStyles = (COLORS) =>
       fontWeight: 'bold',
       textAlign: 'center',
       zIndex: 1,
-    },
-    cancelBtn: {
-      marginLeft: 10,
-      backgroundColor: COLORS.red,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 6,
-    },
-    cancelBtnText: {
-      color: '#ffffff',
-      fontSize: 11,
-      fontWeight: 'bold',
     },
     adBanner: {
       marginTop: 20,
