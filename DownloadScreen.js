@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
-import * as Clipboard from 'expo-clipboard'; // ক্লিপবোর্ড অটো-ডিটেক্ট করার জন্য
+import * as Clipboard from 'expo-clipboard';
 import { useSettings } from './context/SettingsContext';
 
 // --- থিম কাস্টমাইজার কালার প্যালেট ---
@@ -111,13 +111,11 @@ export default function DownloadScreen(props) {
     }
   }, []);
 
-  // --- ফিউচার ৩: স্মার্ট ক্লিপবোর্ড ডিটেকশন ও ফিউচার ৪: শেয়ার শিট ইন্টিগ্রেশন হ্যান্ডলার ---
   useEffect(() => {
     isMounted.current = true;
 
     const checkClipboardAndShare = async () => {
       try {
-        // ক্লিপবোর্ড থেকে লিংক চেক করা
         const clipboardContent = await Clipboard.getStringAsync();
         if (clipboardContent && (clipboardContent.startsWith('http://') || clipboardContent.startsWith('https://'))) {
           if (
@@ -131,7 +129,6 @@ export default function DownloadScreen(props) {
           }
         }
 
-        // শেয়ার শিট বা ডিপ লিংকের মাধ্যমে ইনকামিং লিংক চেক করা
         const initialUrl = await Linking.getInitialURL();
         if (initialUrl) {
           setSharedIncomingUrl(initialUrl);
@@ -220,10 +217,30 @@ export default function DownloadScreen(props) {
     return cleaned || 'Media_File';
   }, []);
 
+  // --- ফরম্যাট লেবেল আপনার নির্দিষ্ট ফরম্যাটে রূপান্তর করার ফাংশন ---
+  const formatDisplayQuality = useCallback((qualityStr, isAudio) => {
+    if (isAudio) return 'MP3';
+    const q = String(qualityStr || '').toLowerCase();
+    
+    if (q.includes('1280') || q.includes('1080') || q.includes('fhd') || q.includes('1080p')) {
+      return '1280 FHD';
+    }
+    if (q.includes('720') || q.includes('hd') || q.includes('720p')) {
+      return '720 HD';
+    }
+    if (q.includes('480') || q.includes('480p') || q.includes('sd')) {
+      return '480 MR';
+    }
+    if (q.includes('360') || q.includes('360p')) {
+      return '360 MR';
+    }
+    return qualityStr ? String(qualityStr) : 'Video';
+  }, []);
+
   const handleFetchMedia = useCallback(async () => {
     const cleanUrl = sanitizeUrl(url);
     if (!cleanUrl) {
-      Alert.alert('ত্রুটি', 'একটি সঠিক ভিডিও লিংক দিন।');
+      Alert.alert('Error', 'Please enter a valid video link.');
       return;
     }
 
@@ -269,7 +286,7 @@ export default function DownloadScreen(props) {
         try {
           data = await response.json();
         } catch (parseErr) {
-          errorMessage = 'সার্ভার থেকে অপ্রত্যাশিত রেসপন্স পাওয়া গেছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+          errorMessage = 'Unexpected response from server. Please try again later.';
         }
 
         if (data && !data.error) {
@@ -296,29 +313,29 @@ export default function DownloadScreen(props) {
 
             parsedFormats.push({
               id: `p_mp3_conv_${Date.now()}`,
-              quality: 'MP3 (High Quality Audio Converter)',
+              quality: 'MP3',
               url: parsedFormats[0]?.url || cleanUrl,
               isAudio: true,
             });
 
             if (parsedFormats.length === 0) {
-              errorMessage = 'পাওয়া ফরম্যাটগুলোর কোনোটিতেই সঠিক ডাউনলোড লিংক পাওয়া যায়নি।';
+              errorMessage = 'No valid download links found in the available formats.';
             }
           } else {
-            errorMessage = 'সার্ভার কোনো ডাউনলোড ফরম্যাট রিটার্ন করেনি।';
+            errorMessage = 'Server did not return any download formats.';
           }
         } else if (data && data.error) {
           errorMessage = String(data.error);
         }
       } else {
-        errorMessage = `সার্ভার এরর (কোড: ${response.status})। কিছুক্ষণ পর আবার চেষ্টা করুন।`;
+        errorMessage = `Server Error (Code: ${response.status}). Please try again later.`;
       }
     } catch (err) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
-        errorMessage = 'সার্ভার থেকে রেসপন্স পেতে দেরি হচ্ছে (টাইমআউট)। রেন্ডার সার্ভার সজাগ হতে একটু সময় নিতে পারে, দয়া করে আবার চেষ্টা করুন।';
+        errorMessage = 'Server response timeout. The render server might be waking up, please try again.';
       } else {
-        errorMessage = 'নেটওয়ার্ক সমস্যা হয়েছে। ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন।';
+        errorMessage = 'Network error occurred. Check your internet connection and try again.';
       }
     }
 
@@ -329,12 +346,12 @@ export default function DownloadScreen(props) {
         setVideoTitle(title);
         if (skippedCount > 0) {
           Alert.alert(
-            'কিছু ফরম্যাট বাদ পড়েছে',
-            `${skippedCount}টি ফরম্যাটের লিংক পাওয়া যায়নি, তাই সেগুলো দেখানো হয়নি।`
+            'Some formats skipped',
+            `${skippedCount} formats were skipped because links were unavailable.`
           );
         }
       } else {
-        Alert.alert('ব্যর্থ', errorMessage || 'ভিডিও লিংক ফেচ করা যায়নি। ব্যাকএন্ড রেসপন্স এবং লিংকটি চেক করুন।');
+        Alert.alert('Failed', errorMessage || 'Could not fetch video links. Check backend and URL.');
       }
     }
   }, [adminSettings, detectPlatform, sanitizeUrl, url]);
@@ -355,7 +372,7 @@ export default function DownloadScreen(props) {
         setDownloadComplete(false);
         setIsSaving(false);
       }
-      Alert.alert('বাতিল', 'ডাউনলোড বাতিল করা হয়েছে।');
+      Alert.alert('Cancelled', 'Download has been cancelled.');
     }
   }, [cleanupTempFile]);
 
@@ -369,11 +386,11 @@ export default function DownloadScreen(props) {
 
       if (!canAskAgain) {
         Alert.alert(
-          'অনুমতি প্রয়োজন',
-          'গ্যালারিতে ভিডিও সেভ করতে ডিভাইস পারমিশন সেটিংসে গিয়ে অ্যালাউ করুন।',
+          'Permission Required',
+          'Please allow storage permissions in settings to save videos to your gallery.',
           [
-            { text: 'বাতিল', style: 'cancel' },
-            { text: 'সেটিংস', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Settings', onPress: () => Linking.openSettings() },
           ]
         );
       }
@@ -452,7 +469,6 @@ export default function DownloadScreen(props) {
         await FileSystem.moveAsync({ from: downloadResult.uri, to: persistentUri });
         currentTempUri.current = null;
 
-        // --- ফিউচার ১: মিনি অডিও প্লেয়ার ট্রিগার করা ---
         setCurrentAudioName(filename);
         setMiniPlayerActive(true);
         setIsPlayingAudio(true);
@@ -475,10 +491,10 @@ export default function DownloadScreen(props) {
         setDownloadProgress(100);
         setDownloadComplete(true);
         Alert.alert(
-          'সফল!',
+          'Success!',
           isAudio
-            ? 'অডিও বা MP3 ফাইল সফলভাবে সেভ ও মিনি প্লেয়ারে লোড হয়েছে।'
-            : 'ভিডিওটি সফলভাবে গ্যালারির "MrDownload" ফোল্ডারে সেভ করা হয়েছে।'
+            ? 'Audio file saved and loaded into mini player successfully.'
+            : 'Video saved successfully to the "MrDownload" gallery folder.'
         );
 
         if (completeTimeoutRef.current) {
@@ -495,7 +511,7 @@ export default function DownloadScreen(props) {
       }
     } catch (err) {
       if (!isCancelled.current) {
-        Alert.alert('ডাউনলোড ব্যর্থ', 'ডাউনলোড সম্পন্ন করা যায়নি। নেটওয়ার্ক চেক করুন।');
+        Alert.alert('Download Failed', 'Could not complete the download. Check your network.');
       }
     } finally {
       activeDownloadResumable.current = null;
@@ -512,21 +528,20 @@ export default function DownloadScreen(props) {
 
   const handleBatchDownload = useCallback(async () => {
     if (!isPremiumUser) {
-      Alert.alert('প্রিমিয়াম ফিচার', 'একসাথে একাধিক (Batch) ডাউনলোড করতে প্রিমিয়াম সাবস্ক্রিপশন প্রয়োজন।');
+      Alert.alert('Premium Feature', 'Batch downloading requires a premium subscription.');
       return;
     }
     if (selectedBatchItems.length === 0) {
-      Alert.alert('সতর্কতা', 'কোনো ফরম্যাট সিলেক্ট করা হয়নি।');
+      Alert.alert('Warning', 'No formats selected for batch download.');
       return;
     }
-    Alert.alert('শুরু হচ্ছে', `${selectedBatchItems.length}টি ফাইল একসাথে ডাউনলোড শুরু হচ্ছে...`);
+    Alert.alert('Starting', `Starting batch download for ${selectedBatchItems.length} files...`);
     for (const item of selectedBatchItems) {
       await startInAppDownload(item);
     }
     setSelectedBatchItems([]);
   }, [isPremiumUser, selectedBatchItems, startInAppDownload]);
 
-  // ডাইনামিক স্টাইল শিট জেনারেটর থিমের ওপর ভিত্তি করে
   const dynamicStyles = getStyles(COLORS);
 
   return (
@@ -534,10 +549,9 @@ export default function DownloadScreen(props) {
       <View style={dynamicStyles.header}>
         <Text style={dynamicStyles.appTitle}>MR DOWNLOAD</Text>
         <Text style={dynamicStyles.subtitle}>
-          {isPremiumUser ? '⭐ প্রিমিয়াম আনলিমিটেড ও অ্যাড-ফ্রি মোড' : 'সোশ্যাল মিডিয়া ভিডিও ডাউনলোডার'}
+          {isPremiumUser ? '⭐ Premium Unlimited & Ad-Free Mode' : 'Social Media Video Downloader'}
         </Text>
 
-        {/* --- ফিউচার ২: থিম কাস্টমাইজার বাটনসমূহ --- */}
         <View style={dynamicStyles.themeSelectorRow}>
           <TouchableOpacity 
             style={[dynamicStyles.themeBtn, currentThemeKey === 'dark' && dynamicStyles.activeThemeBtn]} 
@@ -564,12 +578,11 @@ export default function DownloadScreen(props) {
           onPress={() => setIsPremiumUser(!isPremiumUser)}
         >
           <Text style={dynamicStyles.premiumToggleText}>
-            {isPremiumUser ? '👑 প্রিমিয়াম সক্রিয় আছে' : '✨ প্রিমিয়াম নিন (Upgrade)'}
+            {isPremiumUser ? '👑 Premium Active' : '✨ Upgrade to Premium'}
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* --- ফিউচার ১: মিনি অডিও প্লেয়ার কম্পোনেন্ট --- */}
       {miniPlayerActive && (
         <View style={dynamicStyles.miniPlayerContainer}>
           <View style={dynamicStyles.miniPlayerInfo}>
@@ -589,14 +602,13 @@ export default function DownloadScreen(props) {
         </View>
       )}
 
-      {/* পাসওয়ার্ড প্রটেক্টেড প্রাইভেট ফোল্ডার সেকশন */}
       <View style={dynamicStyles.privateSection}>
-        <Text style={dynamicStyles.privateTitle}>🔒 সিক্রেট প্রাইভেট ফোল্ডার</Text>
+        <Text style={dynamicStyles.privateTitle}>🔒 Secret Private Folder</Text>
         {isPrivateFolderLocked ? (
           <View style={dynamicStyles.lockContainer}>
             <TextInput
               style={dynamicStyles.lockInput}
-              placeholder="পাসওয়ার্ড দিন (যেমন: 1234)"
+              placeholder="Enter password (e.g., 1234)"
               placeholderTextColor={COLORS.muted}
               secureTextEntry
               value={enteredPassword}
@@ -607,18 +619,18 @@ export default function DownloadScreen(props) {
               onPress={() => {
                 if (enteredPassword === (privatePassword || '1234')) {
                   setIsPrivateFolderLocked(false);
-                  Alert.alert('সফল', 'প্রাইভেট ফোল্ডার আনলক করা হয়েছে।');
+                  Alert.alert('Success', 'Private folder unlocked successfully.');
                 } else {
-                  Alert.alert('ভুল পাসওয়ার্ড', 'সঠিক পাসওয়ার্ড দিন। (ডিফল্ট: 1234)');
+                  Alert.alert('Wrong Password', 'Please enter the correct password. (Default: 1234)');
                 }
               }}
             >
-              <Text style={dynamicStyles.unlockBtnText}>আনলক</Text>
+              <Text style={dynamicStyles.unlockBtnText}>Unlock</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={dynamicStyles.unlockedContent}>
-            <Text style={dynamicStyles.unlockedText}>📁 আপনার লক করা ফাইলগুলো এখানে সুরক্ষিত আছে।</Text>
+            <Text style={dynamicStyles.unlockedText}>📁 Your locked files are secure here.</Text>
             <TouchableOpacity 
               style={dynamicStyles.lockAgainBtn}
               onPress={() => {
@@ -626,7 +638,7 @@ export default function DownloadScreen(props) {
                 setEnteredPassword('');
               }}
             >
-              <Text style={dynamicStyles.lockAgainText}>লক করুন</Text>
+              <Text style={dynamicStyles.lockAgainText}>Lock Folder</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -636,7 +648,7 @@ export default function DownloadScreen(props) {
         <Ionicons name="link" size={20} color={COLORS.muted} style={dynamicStyles.linkIcon} />
         <TextInput
           style={dynamicStyles.input}
-          placeholder="ভিডিও লিংক পেস্ট করুন..."
+          placeholder="Paste video link here..."
           placeholderTextColor={COLORS.muted}
           value={url}
           editable={!downloadingUrl && !loading}
@@ -669,17 +681,17 @@ export default function DownloadScreen(props) {
         {loading ? (
           <ActivityIndicator color="#ffffff" />
         ) : (
-          <Text style={dynamicStyles.downloadBtnText}>ফরম্যাট লিংক ফেচ করুন</Text>
+          <Text style={dynamicStyles.downloadBtnText}>Fetch Format Links</Text>
         )}
       </TouchableOpacity>
 
       {downloadFormats.length > 0 ? (
         <View style={dynamicStyles.formatContainer}>
           <View style={dynamicStyles.formatHeaderRow}>
-            <Text style={dynamicStyles.formatTitle}>ডাউনলোড ফরম্যাট বেছে নিন:</Text>
+            <Text style={dynamicStyles.formatTitle}>Select Download Format:</Text>
             {isPremiumUser && (
               <TouchableOpacity style={dynamicStyles.batchDownloadBtn} onPress={handleBatchDownload}>
-                <Text style={dynamicStyles.batchBtnText}>ব্যাস ডাউনলোড (Batch)</Text>
+                <Text style={dynamicStyles.batchBtnText}>Batch Download</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -689,6 +701,9 @@ export default function DownloadScreen(props) {
             const isThisDownloading = downloadingUrl === downloadKey;
             const isAnyDownloading = Boolean(downloadingUrl);
             const isSelectedForBatch = selectedBatchItems.some((i) => i.id === item.id);
+            
+            // নির্দিষ্ট ফরম্যাটে লেবেল তৈরি কল করা
+            const formattedLabel = formatDisplayQuality(item.quality, item.isAudio);
 
             return (
               <View key={item.id || index} style={dynamicStyles.formatCardWrapper}>
@@ -706,7 +721,7 @@ export default function DownloadScreen(props) {
                       size={22}
                       color={item.isAudio ? COLORS.purple : COLORS.green}
                     />
-                    <Text style={dynamicStyles.formatText}>{item.quality}</Text>
+                    <Text style={dynamicStyles.formatText}>{formattedLabel}</Text>
                   </View>
 
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -734,15 +749,15 @@ export default function DownloadScreen(props) {
                       <View style={[dynamicStyles.progressBar, { width: `${downloadProgress}%` }]} />
                       <Text style={dynamicStyles.progressText}>
                         {downloadComplete
-                          ? 'সম্পন্ন হয়েছে ✓'
+                          ? 'Completed ✓'
                           : isSaving
-                          ? 'সেভ করা হচ্ছে...'
-                          : `গতিশীল ডাউনলোড: ${downloadProgress}%`}
+                          ? 'Saving file...'
+                          : `Downloading: ${downloadProgress}%`}
                       </Text>
                     </View>
                     {!downloadComplete && !isSaving ? (
                       <TouchableOpacity style={dynamicStyles.cancelBtn} onPress={cancelDownload}>
-                        <Text style={dynamicStyles.cancelBtnText}>বাতিল</Text>
+                        <Text style={dynamicStyles.cancelBtnText}>Cancel</Text>
                       </TouchableOpacity>
                     ) : null}
                   </View>
@@ -755,7 +770,7 @@ export default function DownloadScreen(props) {
 
       {!isPremiumUser && (
         <View style={dynamicStyles.adBanner}>
-          <Text style={dynamicStyles.adText}>📢 বিজ্ঞাপন: প্রিমিয়াম নিন এবং বিজ্ঞাপন মুক্ত অভিজ্ঞতা উপভোগ করুন!</Text>
+          <Text style={dynamicStyles.adText}>📢 Ad: Upgrade to Premium for an ad-free experience!</Text>
         </View>
       )}
     </ScrollView>
