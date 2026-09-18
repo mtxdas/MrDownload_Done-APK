@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 
 const COLORS = {
   bg: '#0a0818',
@@ -23,10 +24,24 @@ const COLORS = {
   gold: '#f59e0b',
 };
 
-export default function HistoryScreen({ history, onRemove, onClear, onRename, onPlay }) {
+export default function HistoryScreen({ history, onRemove, onClear, onRename }) {
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [currentEditingItem, setCurrentEditingItem] = useState(null);
   const [newTitleText, setNewTitleText] = useState('');
+  
+  // প্লেব্যাক স্টেট
+  const [sound, setSound] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [activePlayingId, setActivePlayingId] = useState(null);
+
+  // কম্পোনেন্ট আনমাউন্ট হলে সাউন্ড অবজেক্ট ক্লিয়ার করা
+  useEffect(() => {
+    return sound
+      ? () => {
+          sound.unloadAsync();
+        }
+      : undefined;
+  }, [sound]);
 
   const getPlatformIcon = (platform) => {
     switch (platform) {
@@ -47,11 +62,46 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
     }
   };
 
-  const handlePlay = (item) => {
-    if (onPlay) {
-      onPlay(item);
-    } else {
-      Alert.alert('Play', `Playing: ${item.title}`);
+  // রিয়েল মিডিয়া প্লে করার ফাংশন
+  const handlePlay = async (item) => {
+    try {
+      if (!item.url) {
+        Alert.alert('ত্রুটি', 'এই ফাইলের কোনো প্লেব্যাক লিংক পাওয়া যায়নি।');
+        return;
+      }
+
+      // যদি ইতিমধ্যে অন্য কোনো অডিও/ভিডিও বাজতে থাকে তবে তা বন্ধ করা
+      if (sound) {
+        await sound.stopAsync();
+        await sound.unloadAsync();
+        setSound(null);
+        if (activePlayingId === item.id) {
+          setIsPlaying(false);
+          setActivePlayingId(null);
+          return;
+        }
+      }
+
+      Alert.alert('প্লে হচ্ছে', `লোড হচ্ছে: ${item.title || 'Media'}`);
+
+      const { sound: playbackSound } = await Audio.Sound.createAsync(
+        { uri: item.url },
+        { shouldPlay: true }
+      );
+
+      setSound(playbackSound);
+      setIsPlaying(true);
+      setActivePlayingId(item.id);
+
+      playbackSound.setOnPlaybackStatusUpdate((status) => {
+        if (status.didJustFinish) {
+          setIsPlaying(false);
+          setActivePlayingId(null);
+        }
+      });
+    } catch (error) {
+      console.error('Play Error:', error);
+      Alert.alert('প্লেব্যাক ব্যর্থ হয়েছে', 'এই ফাইলটি সরাসরি প্লে করা সম্ভব হচ্ছে না।');
     }
   };
 
@@ -63,7 +113,7 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
 
   const handleSaveRename = () => {
     if (!newTitleText.trim()) {
-      Alert.alert('Error', 'File name cannot be empty.');
+      Alert.alert('ত্রুটি', 'ফাইলের নাম খালি রাখা যাবে না।');
       return;
     }
     if (onRename && currentEditingItem) {
@@ -73,54 +123,60 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
     setCurrentEditingItem(null);
   };
 
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
-      <View style={styles.cardTopRow}>
-        <View style={styles.iconBox}>
-          {getPlatformIcon(item.platform)}
-        </View>
-        
-        <View style={styles.info}>
-          <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.meta}>{item.quality} • {item.size || 'Auto'} • {item.time || 'Recently'}</Text>
-        </View>
+  const renderItem = ({ item }) => {
+    const isThisItemPlaying = activePlayingId === item.id && isPlaying;
 
-        <View style={styles.statusBox}>
-          <View style={styles.doneBadge}>
-            <Ionicons name="checkmark" size={12} color="#fff" />
-            <Text style={styles.doneText}>DONE</Text>
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardTopRow}>
+          <View style={styles.iconBox}>
+            {getPlatformIcon(item.platform)}
+          </View>
+          
+          <View style={styles.info}>
+            <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+            <Text style={styles.meta}>{item.quality || 'HD'} • {item.size || 'Auto'} • {item.time || 'Recently'}</Text>
+          </View>
+
+          <View style={styles.statusBox}>
+            <View style={styles.doneBadge}>
+              <Ionicons name="checkmark" size={12} color="#fff" />
+              <Text style={styles.doneText}>DONE</Text>
+            </View>
           </View>
         </View>
+
+        {/* অ্যাকশন বাটনসমূহ: Play, Rename, Delete */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity 
+            style={styles.actionBtn} 
+            onPress={() => handlePlay(item)}
+          >
+            <Ionicons name={isThisItemPlaying ? "pause" : "play"} size={14} color={COLORS.green} />
+            <Text style={[styles.actionText, { color: COLORS.green }]}>
+              {isThisItemPlaying ? 'Pause' : 'Play'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionBtn} 
+            onPress={() => handleOpenRename(item)}
+          >
+            <Ionicons name="create-outline" size={14} color={COLORS.gold} />
+            <Text style={[styles.actionText, { color: COLORS.gold }]}>Rename</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionBtn} 
+            onPress={() => onRemove(item.id)}
+          >
+            <Ionicons name="trash-outline" size={14} color={COLORS.red} />
+            <Text style={[styles.actionText, { color: COLORS.red }]}>Delete</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-
-      {/* অ্যাকশন বাটনসমূহ: Play, Rename, Delete */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity 
-          style={styles.actionBtn} 
-          onPress={() => handlePlay(item)}
-        >
-          <Ionicons name="play" size={14} color={COLORS.green} />
-          <Text style={[styles.actionText, { color: COLORS.green }]}>Play</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.actionBtn} 
-          onPress={() => handleOpenRename(item)}
-        >
-          <Ionicons name="create-outline" size={14} color={COLORS.gold} />
-          <Text style={[styles.actionText, { color: COLORS.gold }]}>Rename</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.actionBtn} 
-          onPress={() => onRemove(item.id)}
-        >
-          <Ionicons name="trash-outline" size={14} color={COLORS.red} />
-          <Text style={[styles.actionText, { color: COLORS.red }]}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -155,12 +211,12 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Rename File</Text>
+            <Text style={styles.modalTitle}>ফাইল রিনেম করুন</Text>
             <TextInput
               style={styles.modalInput}
               value={newTitleText}
               onChangeText={setNewTitleText}
-              placeholder="Enter new file name"
+              placeholder="নতুন নাম লিখুন"
               placeholderTextColor={COLORS.muted}
             />
             <View style={styles.modalBtnRow}>
@@ -168,13 +224,13 @@ export default function HistoryScreen({ history, onRemove, onClear, onRename, on
                 style={[styles.modalBtn, { backgroundColor: COLORS.border }]}
                 onPress={() => setRenameModalVisible(false)}
               >
-                <Text style={styles.modalBtnText}>Cancel</Text>
+                <Text style={styles.modalBtnText}>বাতিল</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalBtn, { backgroundColor: COLORS.purple }]}
                 onPress={handleSaveRename}
               >
-                <Text style={styles.modalBtnText}>Save</Text>
+                <Text style={styles.modalBtnText}>সেভ</Text>
               </TouchableOpacity>
             </View>
           </View>
